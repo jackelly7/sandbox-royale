@@ -19,6 +19,13 @@ export type Player = PlayerPose &
     dropping: boolean;
     killedBy: string | null;
     diedAt: number;
+    spectator?: boolean;
+    team?: number;
+    downed?: boolean;
+    bleedOutAt?: number;
+    downedBy?: string | null;
+    reviving?: string | null;
+    reviveUntil?: number;
     owned: boolean[];
     ammo: number[];
     reserve: number[];
@@ -37,10 +44,20 @@ export type RoomSnapshot = {
   players: Player[];
   loot: boolean[];
   events: GameEvent[];
+  mode?: 'solo' | 'duos';
+  winningTeam?: number | null;
 };
 export type GameEvent = {
   id: string;
-  type: 'shot' | 'hit' | 'elimination' | 'pickup' | 'heal';
+  type:
+    | 'shot'
+    | 'hit'
+    | 'elimination'
+    | 'pickup'
+    | 'heal'
+    | 'down'
+    | 'revive'
+    | 'mark';
   player: string;
   target?: string;
   end?: [number, number, number];
@@ -50,6 +67,7 @@ export type GameEvent = {
   shieldBreak?: boolean;
   headshot?: boolean;
   item?: SupplyKind;
+  label?: 'Go here' | 'Enemy' | 'Loot';
 };
 export type Command =
   | { type: 'pose'; pose: PlayerPose }
@@ -61,8 +79,28 @@ export type Command =
   | { type: 'start' }
   | { type: 'rematch' }
   | { type: 'leave' }
-  | { type: 'ping' };
+  | { type: 'ping' }
+  | { type: 'mode'; mode: 'solo' | 'duos' }
+  | { type: 'team'; team: number }
+  | { type: 'revive'; target: string }
+  | { type: 'cancelRevive' }
+  | {
+      type: 'mark';
+      point: [number, number, number];
+      label: 'Go here' | 'Enemy' | 'Loot';
+    };
+// Room controls and squad actions are validated by the authoritative server.
 export type RoomSession = { code: string; playerId: string; token: string };
+export type ActiveRoom = {
+  mode: 'solo' | 'duos';
+  code: string;
+  hostName: string;
+  phase: RoomSnapshot['phase'];
+  players: number;
+  capacity: number;
+  alive: number;
+  joinable: boolean;
+};
 export type ConnectionStatus =
   | 'connecting'
   | 'connected'

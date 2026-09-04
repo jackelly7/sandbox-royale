@@ -4,9 +4,18 @@ import {
   advance,
   parseCommand,
   snapshot,
+  forViewer,
   GameError,
 } from './model.ts';
-import { authorize, create, join, pool, rateLimit, transact } from './store.ts';
+import {
+  authorize,
+  create,
+  join,
+  listRooms,
+  pool,
+  rateLimit,
+  transact,
+} from './store.ts';
 export type SocketLike = {
   readyState: number;
   bufferedAmount: number;
@@ -173,7 +182,7 @@ const poll = setInterval(() => {
           if (error) send(socket, { type: 'error', ...error });
           send(socket, {
             type: 'snapshot',
-            room: result.room,
+            room: forViewer(result.room, session.id),
             ack:
               result.acks.get(session.id) ??
               Math.max(0, ...actions.map((a) => a[0])),
@@ -219,6 +228,8 @@ export async function handleHttp(request: Request) {
       response = new Response(null, { status: 204 });
     else if (url.pathname === '/health')
       response = json({ ok: true, service: 'lastlight-multiplayer' });
+    else if (request.method === 'GET' && url.pathname === '/rooms')
+      response = json({ rooms: await listRooms() });
     else if (
       request.method === 'POST' &&
       (url.pathname === '/rooms' ||

@@ -10,7 +10,7 @@ import {
   Check,
   ChevronRight,
   Crosshair,
-  Expand,
+  Footprints,
   Flag,
   Gamepad2,
   Heart,
@@ -39,6 +39,7 @@ import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import type { BattleGame, GameState } from '@/lib/game/engine';
 import { FriendsRoom } from '@/components/friends-room';
+import { ActiveGames } from '@/components/active-games';
 import { MultiplayerClient } from '@/lib/game/network';
 import type {
   RoomSnapshot,
@@ -58,7 +59,7 @@ const initial: GameState = {
   dropping: false,
   altitude: 0,
   threat: 0,
-  killer: 'The island',
+  killer: 'The sandbox',
   deathRemaining: 0,
   survived: 0,
   eliminationPulse: 0,
@@ -99,9 +100,10 @@ const controls = [
   ['SHIFT', 'Sprint'],
   ['SPACE', 'Jump'],
   ['R', 'Reload'],
-  ['E', 'Collect supplies'],
+  ['E', 'Collect / revive teammate'],
+  ['G / Middle click', 'Ping enemy, loot, or location'],
   ['Q / F', 'Use medkit / shield cell'],
-  ['X', 'Cancel healing'],
+  ['X', 'Cancel healing / revive'],
   ['[ / ]', 'Switch player while spectating'],
   ['1  2  3 / WHEEL', 'Switch collected weapons'],
   ['ESC', 'Pause'],
@@ -118,7 +120,7 @@ function IslandMap({
     <svg
       className={large ? 'island-map large' : 'island-map'}
       viewBox="-120 -120 240 240"
-      aria-label="Island map with your position and the safe zone"
+      aria-label="Sandbox map with your position and the safe zone"
     >
       <defs>
         <pattern
@@ -136,16 +138,30 @@ function IslandMap({
           />
         </pattern>
       </defs>
-      <rect x="-120" y="-120" width="240" height="240" fill="#397985" />
+      <rect x="-120" y="-120" width="240" height="240" fill="#9d6b40" />
+      <rect x="-113" y="-113" width="226" height="226" fill="#e8c780" />
       <path
         d="M-24-107 18-108 40-94 63-92 79-68 99-56 105-21 111 7 97 28 95 56 64 69 58 89 27 104-5 109-31 97-61 94-73 69-94 50-103 23-107-5-98-33-85-47-78-73-53-83Z"
         fill="#d6ca95"
       />
       <path
         d="M-23-100 17-100 37-87 60-84 72-62 92-51 98-20 101 6 88 25 87 50 58 63 52 82 25 96-4 101-29 90-56 86-65 64-86 44-95 19-99-4-91-28-79-42-72-66-48-77Z"
-        fill="#82a578"
+        fill="#e8c780"
       />
-      <path d="M0-88V92M-80 4H82M40-53V31" stroke="#d0c9a0" strokeWidth="7" />
+      <path d="M0-88V92M-80 4H82M40-53V31" stroke="#cda65d" strokeWidth="7" />
+      {state.pingPoints?.map((point) => (
+        <g key={point.id}>
+          <circle
+            cx={point.x}
+            cy={point.z}
+            r={4}
+            fill={point.label === 'Enemy' ? '#ff786a' : '#a7ffcf'}
+            stroke="#111"
+            strokeWidth={1.5}
+          />
+          <title>{point.label}</title>
+        </g>
+      ))}
       {[
         [18, -23, 14, 12],
         [-22, -16, 14, 12],
@@ -220,7 +236,7 @@ function IslandMap({
       {large && (
         <>
           <text x="18" y="-36">
-            SUNSET STATION
+            SANDCASTLE SQUARE
           </text>
           <text x="-34" y="44">
             PALM GROVE
@@ -243,6 +259,7 @@ export default function Home() {
   const [panel, setPanel] = useState<
     'controls' | 'settings' | 'map' | 'friends' | null
   >(null);
+  const [visualSound, setVisualSound] = useState(true);
   const [muted, setMuted] = useState(false),
     [sensitivity, setSensitivity] = useState(1),
     [touch, setTouch] = useState(false),
@@ -269,7 +286,7 @@ export default function Home() {
     setPanel(null);
   };
   const enterRoom = async (name: string, code?: string) => {
-    if (!game.current) return;
+    if (!game.current || roomBusy || session) return;
     setRoomBusy(true);
     setRoomError('');
     try {
@@ -287,7 +304,11 @@ export default function Home() {
             roomUIAt.current = Date.now();
           }
           game.current?.applyNetworkSnapshot(next, acknowledgedPose);
-          if (next.phase === 'countdown' && roomPhase.current !== 'countdown')
+          if (
+            (next.phase === 'countdown' && roomPhase.current !== 'countdown') ||
+            ((next.phase === 'playing' || next.phase === 'finished') &&
+              roomPhase.current === 'waiting')
+          )
             setPanel(null);
           roomPhase.current = next.phase;
         },
@@ -374,6 +395,22 @@ export default function Home() {
     lobby = state.phase === 'lobby',
     ended = state.phase === 'won' || state.phase === 'lost',
     spectating = state.phase === 'spectating';
+  const ownPlayer = room?.players.find((p) => p.id === session?.playerId);
+  const teammate =
+    room?.mode === 'duos'
+      ? room.players.find(
+          (p) =>
+            p.id !== session?.playerId &&
+            p.team === ownPlayer?.team &&
+            !p.spectator,
+        )
+      : null;
+  const reviveTarget =
+    teammate?.downed &&
+    !ownPlayer?.downed &&
+    Math.hypot(teammate.x - state.x, teammate.z - state.z) <= 3
+      ? teammate
+      : null;
   const time = Math.max(
     0,
     Math.ceil(state.elapsed < 35 ? 35 - state.elapsed : 270 - state.elapsed),
@@ -388,7 +425,7 @@ export default function Home() {
       <div
         className="world-view"
         ref={viewport}
-        aria-label="3D battle royale island"
+        aria-label="3D sandbox battle royale arena"
       />
       <div className={`world-shade ${lobby ? 'lobby-shade' : ''}`} />
       {lobby && (
@@ -441,7 +478,7 @@ export default function Home() {
           <div className="lobby-main">
             <section className="title-block">
               <div className="eyebrow">
-                <span /> ONE ISLAND. ONE SURVIVOR.
+                <span /> ONE SANDBOX. LAST ONE STANDING.
               </div>
               <h1>
                 Sandbox
@@ -449,7 +486,7 @@ export default function Home() {
                 <span>Royale.</span>
               </h1>
               <p>
-                Drop in. Gear up. Outlast everyone.
+                Drop into the sand. Gear up. Outlast everyone.
                 <br />
                 Your next close call starts here.
               </p>
@@ -484,33 +521,24 @@ export default function Home() {
               <div className="location-label">
                 <MapPin size={17} />
                 <div>
-                  SUNSET STATION<span>SANDBOX ISLAND</span>
+                  SANDCASTLE SQUARE<span>THE SANDBOX</span>
                 </div>
               </div>
             </div>
-            <aside className="island-card">
-              <div className="card-eyebrow">
-                <span className="live-dot" /> THE BATTLEGROUND <span>01</span>
-              </div>
-              <button
-                className="map-preview"
-                onClick={() => setPanel('map')}
-                aria-label="Explore the island map"
-              >
-                <IslandMap state={state} />
-                <span className="map-expand">
-                  <Expand size={16} />
-                </span>
-                <span className="map-north">N</span>
-              </button>
-              <div className="island-card-caption">
-                <div>
-                  <h2>Sandbox Island</h2>
-                  <p>Clear skies. Closing storm.</p>
-                </div>
-                <ArrowRight size={20} />
-              </div>
-            </aside>
+            <ActiveGames
+              ready={ready && !error}
+              currentCode={session?.code}
+              select={(code) => {
+                setInviteCode(code);
+                setRoomError('');
+                setPanel('friends');
+              }}
+              create={() => {
+                setInviteCode('');
+                setRoomError('');
+                setPanel('friends');
+              }}
+            />
           </div>
           <footer className="lobby-footer">
             <div className="deployment-card">
@@ -543,7 +571,7 @@ export default function Home() {
                     ? session
                       ? 'OPEN ROOM'
                       : 'DROP IN SOLO'
-                    : 'PREPARING ISLAND'}
+                    : 'RAKING THE SANDBOX'}
               </span>
               {ready ? (
                 <ArrowRight size={28} />
@@ -664,6 +692,94 @@ export default function Home() {
               <small>3×</small>
             </div>
           )}
+          {playing && visualSound && !!state.footsteps?.length && (
+            <div className="footstep-ring" aria-label="Nearby enemy footsteps">
+              {state.footsteps.map((cue) => (
+                <div
+                  key={cue.id}
+                  className="footstep-direction"
+                  style={{
+                    transform: `rotate(${cue.angle}deg)`,
+                    opacity: cue.strength,
+                  }}
+                >
+                  <i />
+                  <Footprints
+                    size={22}
+                    style={{
+                      transform: `translateX(-50%) rotate(${-cue.angle}deg)`,
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          {playing &&
+            state.markers?.map((mark) => (
+              <div
+                key={mark.id}
+                className={`squad-ping ${mark.label === 'Enemy' ? 'enemy-ping' : ''}`}
+                style={{ left: `${mark.x}%`, top: `${mark.y}%` }}
+              >
+                <MapPin size={24} />
+                <span>
+                  {mark.label} · {mark.distance}m
+                </span>
+              </div>
+            ))}
+          {playing && teammate && (
+            <aside className="squad-status">
+              <span>YOUR DUO · TEAM {(ownPlayer?.team ?? 0) + 1}</span>
+              <strong>{teammate.name}</strong>
+              <p>
+                {teammate.downed
+                  ? 'DOWNED · Get close and press E to revive'
+                  : teammate.health <= 0
+                    ? 'Out of the sandbox'
+                    : `${Math.ceil(teammate.health)} health · ${Math.ceil(teammate.shield)} shield`}
+              </p>
+            </aside>
+          )}
+          {playing && ownPlayer?.downed && (
+            <output className="downed-banner">
+              <strong>DOWN, BUT NOT OUT</strong>
+              <span>
+                Crawl to your teammate ·{' '}
+                {Math.max(
+                  0,
+                  Math.ceil(
+                    ((ownPlayer.bleedOutAt ?? 0) - (room?.now ?? 0)) / 1000,
+                  ),
+                )}
+                s to revive
+              </span>
+            </output>
+          )}
+          {playing && ownPlayer?.reviving && (
+            <output className="revive-progress">
+              <strong>Reviving {teammate?.name ?? 'teammate'}</strong>
+              <span>
+                {Math.max(
+                  0,
+                  ((ownPlayer.reviveUntil ?? 0) - (room?.now ?? 0)) / 1000,
+                ).toFixed(1)}
+                s · Stay close
+              </span>
+              <button
+                onClick={() => client.current?.send({ type: 'cancelRevive' })}
+              >
+                Cancel · X
+              </button>
+            </output>
+          )}
+          {playing && reviveTarget && !ownPlayer?.reviving && (
+            <button
+              className="revive-prompt"
+              onClick={() => game.current?.interact()}
+            >
+              <kbd>E</kbd> Revive {reviveTarget.name}
+            </button>
+          )}
           <div className={`damage-flash ${state.hurt > 0 ? 'active' : ''}`} />
           {state.outside && (
             <div className="storm-warning">
@@ -767,8 +883,9 @@ export default function Home() {
           {state.phase === 'dying' && (
             <section className="death-overlay" aria-label="Elimination">
               <Skull size={36} />
-              <span>ELIMINATED BY</span>
+              <span>OUT OF THE SANDBOX</span>
               <strong>{state.killer}</strong>
+              <small>Eliminated you</small>
               <p>
                 #{state.rank} · {state.kills} eliminations
               </p>
@@ -854,14 +971,18 @@ export default function Home() {
               </small>
             </section>
           )}
-          {state.pickup && playing && (
-            <button
-              className="pickup-prompt"
-              onClick={() => game.current?.pickup()}
-            >
-              <kbd>E</kbd> COLLECT <b>{state.pickup}</b>
-            </button>
-          )}
+          {state.pickup &&
+            playing &&
+            !ownPlayer?.downed &&
+            !reviveTarget &&
+            !ownPlayer?.reviving && (
+              <button
+                className="pickup-prompt"
+                onClick={() => game.current?.interact()}
+              >
+                <kbd>E</kbd> COLLECT <b>{state.pickup}</b>
+              </button>
+            )}
           {!spectating && (
             <div className="hud-bottom">
               <div className="vitals">
@@ -1045,6 +1166,13 @@ export default function Home() {
                 <Crosshair size={32} />
               </button>
               <button
+                className="touch-ping"
+                onClick={() => game.current?.mark()}
+                aria-label="Ping location"
+              >
+                <MapPin size={22} />
+              </button>
+              <button
                 className="touch-aim"
                 onClick={() => game.current?.setAiming(!state.aiming)}
                 aria-label="Toggle aim"
@@ -1083,7 +1211,7 @@ export default function Home() {
             <p>
               {session
                 ? 'The match keeps running while this menu is open.'
-                : 'The island can wait.'}
+                : 'The sandbox can wait.'}
             </p>
             {state.notice.includes('mouse') && <p>{state.notice}</p>}
             <button className="deploy-button" onClick={start}>
@@ -1123,17 +1251,24 @@ export default function Home() {
             </div>
             <div className="eyebrow">
               {state.phase === 'won'
-                ? 'THE ISLAND IS YOURS'
-                : 'LIVE. LEARN. DROP AGAIN.'}
+                ? 'THE SANDBOX IS YOURS'
+                : 'OUT OF THE SANDBOX'}
             </div>
             <h2>
               {state.phase === 'won'
-                ? 'LAST ONE\nSTANDING.'
-                : 'NEXT ROUND.\nNEW CHANCE.'}
+                ? room?.mode === 'duos'
+                  ? 'LAST DUO IN\nTHE SANDBOX.'
+                  : 'LAST ONE IN\nTHE SANDBOX.'
+                : 'BACK TO THE\nSANDBOX?'}
             </h2>
             <div className="result-stats">
               <div>
-                <b>#{state.rank}</b>
+                <b>
+                  {room?.players.find((p) => p.id === session?.playerId)
+                    ?.spectator
+                    ? '—'
+                    : `#${state.rank}`}
+                </b>
                 <span>PLACEMENT</span>
               </div>
               <div>
@@ -1167,6 +1302,7 @@ export default function Home() {
                   <span>ELIMS</span>
                 </div>
                 {[...room.players]
+                  .filter((p) => !p.spectator)
                   .sort(
                     (a, b) =>
                       (a.rank || 99) - (b.rank || 99) || b.kills - a.kills,
@@ -1232,16 +1368,16 @@ export default function Home() {
                 ? 'KNOW YOUR MOVES.'
                 : panel === 'settings'
                   ? 'MAKE IT YOURS.'
-                  : 'KNOW THE ISLAND.'}
+                  : 'KNOW THE SANDBOX.'}
           </DialogTitle>
           <DialogDescription>
             {panel === 'friends'
-              ? 'One room. One island. One winner.'
+              ? 'Your friends. Your sandbox. Last team standing.'
               : panel === 'controls'
                 ? 'Find supplies, stay inside the storm, and outlast your rivals.'
                 : panel === 'settings'
                   ? 'Set up your next drop.'
-                  : 'Sandbox Island. Learn the routes. Find your cover.'}
+                  : 'Sandcastle Square. Find cover, loot, and your next landing spot.'}
           </DialogDescription>
           {panel === 'friends' && (
             <FriendsRoom
@@ -1255,9 +1391,9 @@ export default function Home() {
                 void enterRoom(name, code);
               }}
               leave={leaveRoom}
-              command={(type) => {
+              command={(command) => {
                 setRoomError('');
-                client.current?.send({ type });
+                client.current?.send(command);
               }}
             />
           )}
@@ -1320,7 +1456,7 @@ export default function Home() {
               <div className="setting-row">
                 <div>
                   <label htmlFor="sound-switch">Game audio</label>
-                  <p>Weapon fire, pickups, and match cues</p>
+                  <p>Directional footsteps, weapon fire, and match cues</p>
                 </div>
                 <Switch
                   id="sound-switch"
@@ -1329,6 +1465,17 @@ export default function Home() {
                     setMuted(!v);
                     if (game.current) game.current.muted = !v;
                   }}
+                />
+              </div>
+              <div className="setting-row">
+                <div>
+                  <label htmlFor="visual-sound-switch">Visual footsteps</label>
+                  <p>Show nearby enemy footsteps around your crosshair</p>
+                </div>
+                <Switch
+                  id="visual-sound-switch"
+                  checked={visualSound}
+                  onCheckedChange={setVisualSound}
                 />
               </div>
               <div className="setting-row">

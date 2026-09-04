@@ -69,3 +69,14 @@ The interface uses the supplied Sandbox logo, the black and white palette from h
 ## Aim and combat balance
 
 Right-click to aim, or toggle the aim button on touch screens. The sniper's physical model hides while scoped so its transparent 3× reticle has a clear sightline. AR and shotgun aim views keep the model below the center dot. Damage is 14 per AR bullet, 10 per shotgun pellet, and 50 per sniper round. Headshots multiply damage by 1.5. A fresh player with 100 health and 50 shields survives any single weapon blast, including a full shotgun headshot.
+
+
+### Active games, duos, and the sandbox
+
+The homepage lists up to 50 rooms with a recent player heartbeat, refreshing every 10 seconds while visible. Room summaries expose only names, codes, mode, phase, and counts. Waiting rooms accept players; late arrivals spectate and reserve a seat for the next round. Full rooms are disabled and joins recheck capacity transactionally. The homepage proxies room creation, joining, and discovery to the live server so membership changes use row locks instead of racing high-frequency snapshots. `node scripts/test-site-join.mjs` verifies the homepage API against live sockets; set SITE_TEST_URL to target a deployed site.
+
+Hosts choose free-for-all or Duos. Each player can select a team of up to two; a match needs at least two teams. Friendly fire is disabled. A lethal hit downs a player for 20 seconds if a teammate is still standing. Press E within 3m to revive for four seconds, restoring 50 health. Damage to either player, leaving range, another combat action, or X cancels the revive. Losing the last standing teammate eliminates the duo. Victory is shared by the winning team.
+
+G or middle-click marks an enemy, loot, or location for eight seconds. The touch HUD has a ping button. Duo pings are filtered per authenticated player, never sent to opposing teams. Nearby moving enemies produce stereo footsteps and a directional ring around the crosshair; Visual footsteps can be toggled independently from audio in Settings.
+
+The arena uses sandy ground, wooden sandbox edges, sandcastle cover, and oversized toy buckets. Static geometry still batches down to roughly 60 draw submissions.

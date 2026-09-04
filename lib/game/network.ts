@@ -5,11 +5,19 @@ import type {
   RoomSession,
   RoomSnapshot,
   PlayerPose,
+  ActiveRoom,
 } from './multiplayer.ts';
 
-async function requestRoom(body: unknown, timeout: number) {
+async function requestRoom(
+  body: unknown,
+  timeout: number,
+  signal?: AbortSignal,
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
+  const cancel = () => controller.abort();
+  if (signal?.aborted) controller.abort();
+  signal?.addEventListener('abort', cancel, { once: true });
   try {
     const response = await fetch(MULTIPLAYER_URL, {
       method: 'POST',
@@ -31,10 +39,22 @@ async function requestRoom(body: unknown, timeout: number) {
     throw error;
   } finally {
     clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
   }
 }
 
 export class MultiplayerClient {
+  static async list(signal?: AbortSignal): Promise<ActiveRoom[]> {
+    const { response, data: raw } = await requestRoom(
+      { type: 'list' },
+      8000,
+      signal,
+    );
+    const data = raw as { rooms?: ActiveRoom[]; error?: string };
+    if (!response.ok || !Array.isArray(data?.rooms))
+      throw new Error(data?.error || 'Could not load active games. Try again.');
+    return data.rooms;
+  }
   session: RoomSession;
   onRoom: (room: RoomSnapshot, acknowledgedPose?: PlayerPose) => void;
   onStatus: (status: ConnectionStatus) => void;

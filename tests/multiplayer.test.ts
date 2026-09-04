@@ -83,7 +83,7 @@ void test('host starts one shared countdown and all players spawn clear of cover
   advance(room, at + 5001);
   assert.equal(room.phase, 'playing');
 });
-void test('rooms require two players and reject late joins and a ninth player', () => {
+void test('rooms require two players and reject a ninth player in every phase', () => {
   const room = createRoom(
     'ABC234',
     createMember('host', 'Host', 'secret', at),
@@ -102,7 +102,7 @@ void test('rooms require two players and reject late joins and a ninth player', 
   applyCommand(room, 'host', { type: 'start' }, at);
   assert.throws(
     () => addMember(room, createMember('late', 'Late', 'secret', at)),
-    /already started/,
+    /full/,
   );
 });
 void test('server rejects teleports and malformed movement', () => {

@@ -13,6 +13,7 @@ import {
 import { Input } from '@/components/ui/input';
 import type {
   ConnectionStatus,
+  Command,
   RoomSession,
   RoomSnapshot,
 } from '@/lib/game/multiplayer';
@@ -35,7 +36,7 @@ export function FriendsRoom({
   inviteCode: string;
   enter: (name: string, code?: string) => void;
   leave: () => void;
-  command: (type: 'start' | 'rematch') => void;
+  command: (command: Command) => void;
 }) {
   const [name, setName] = useState(''),
     [code, setCode] = useState(inviteCode),
@@ -56,6 +57,12 @@ export function FriendsRoom({
   if (!session)
     return (
       <div className="friends-content">
+        {inviteCode && (
+          <p className="selected-room">
+            Join room <strong>{inviteCode}</strong>. Enter your name, then join
+            below.
+          </p>
+        )}
         <label htmlFor="player-name">Your player name</label>
         <Input
           id="player-name"
@@ -70,14 +77,21 @@ export function FriendsRoom({
           data-lpignore="true"
           className="room-input"
         />
-        <button
-          className="deploy-button"
-          disabled={busy || !name.trim()}
-          onClick={() => enter(name)}
-        >
-          CREATE ROOM <Users size={22} />
-        </button>
-        <div className="room-divider">OR JOIN YOUR FRIENDS</div>
+        {!inviteCode && (
+          <>
+            <button
+              className="deploy-button"
+              disabled={busy || !name.trim()}
+              onClick={() => enter(name)}
+            >
+              CREATE ROOM <Users size={22} />
+            </button>
+            <p className="touch-help">
+              Rooms appear in Active games so other visitors can join.
+            </p>
+            <div className="room-divider">OR JOIN A ROOM</div>
+          </>
+        )}
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -114,12 +128,12 @@ export function FriendsRoom({
               type="submit"
               aria-label="Join room"
             >
-              <ArrowRight size={24} />
+              Join <ArrowRight size={20} />
             </button>
           </div>
         </form>
         {busy && (
-          <output className="room-status">Connecting to the island...</output>
+          <output className="room-status">Joining the sandbox...</output>
         )}
         {error && (
           <p className="room-error" role="alert">
@@ -127,8 +141,8 @@ export function FriendsRoom({
           </p>
         )}
         <p className="touch-help">
-          2–8 friends. Land unarmed. Collect an AR, shotgun, or sniper. The host
-          starts the match when everyone has joined.
+          2–8 players. Land in the sandbox unarmed. Collect an AR, shotgun, or
+          sniper. The host starts the match when everyone has joined.
         </p>
       </div>
     );
@@ -161,6 +175,52 @@ export function FriendsRoom({
               : 'CONNECTING...'}
         <span>{room?.players.length ?? 1} / 8 PLAYERS</span>
       </div>
+      {room?.phase === 'waiting' && (
+        <div className="room-mode-controls">
+          <span>Match mode {isHost ? '' : '· chosen by host'}</span>
+          <div className="mode-options">
+            {(['solo', 'duos'] as const).map((mode) => (
+              <button
+                key={mode}
+                disabled={!isHost || status !== 'connected'}
+                aria-pressed={(room.mode ?? 'solo') === mode}
+                onClick={() => command({ type: 'mode', mode })}
+              >
+                {mode === 'solo' ? 'Free for all' : 'Duos'}
+              </button>
+            ))}
+          </div>
+          {room.mode === 'duos' && (
+            <>
+              <p>Choose the same team as your friend. Two players per team.</p>
+              <div className="team-options">
+                {[0, 1, 2, 3].map((team) => (
+                  <button
+                    key={team}
+                    aria-pressed={
+                      room.players.find((p) => p.id === session.playerId)
+                        ?.team === team
+                    }
+                    disabled={
+                      status !== 'connected' ||
+                      (room.players.filter((p) => p.team === team).length >=
+                        2 &&
+                        room.players.find((p) => p.id === session.playerId)
+                          ?.team !== team)
+                    }
+                    onClick={() => command({ type: 'team', team })}
+                  >
+                    Team {team + 1}{' '}
+                    <small>
+                      {room.players.filter((p) => p.team === team).length}/2
+                    </small>
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      )}
       <ul className="room-players">
         {room?.players.map((p) => (
           <li key={p.id}>
@@ -169,6 +229,7 @@ export function FriendsRoom({
             </span>
             <div>
               {p.name}
+              {room?.mode === 'duos' && <small>TEAM {(p.team ?? 0) + 1}</small>}
               {p.id === session.playerId && <small>YOU</small>}
             </div>
             {p.id === room.host && <Crown size={15} />}
@@ -176,9 +237,13 @@ export function FriendsRoom({
               className={p.connected ? 'connected-text' : 'disconnected-text'}
             >
               {room.phase === 'playing' || room.phase === 'finished'
-                ? p.health > 0
-                  ? 'ALIVE'
-                  : `#${p.rank}`
+                ? p.spectator
+                  ? 'SPECTATING'
+                  : p.downed
+                    ? 'DOWNED'
+                    : p.health > 0
+                      ? 'ALIVE'
+                      : `#${p.rank}`
                 : p.connected
                   ? 'READY'
                   : 'RECONNECTING'}
@@ -200,7 +265,7 @@ export function FriendsRoom({
               status !== 'connected' ||
               room.players.filter((p) => p.connected).length < 2
             }
-            onClick={() => command('start')}
+            onClick={() => command({ type: 'start' })}
           >
             {isHost ? 'START MATCH' : 'WAITING FOR HOST'}
             <ArrowRight size={22} />
@@ -218,12 +283,12 @@ export function FriendsRoom({
         <>
           <div className="room-winner">
             {room.players.find((p) => p.id === room.winner)?.name ?? 'No one'}{' '}
-            survived the island.
+            was last in the sandbox.
           </div>
           <button
             className="deploy-button"
             disabled={!isHost || status !== 'connected'}
-            onClick={() => command('rematch')}
+            onClick={() => command({ type: 'rematch' })}
           >
             {isHost ? 'PREPARE REMATCH' : 'WAITING FOR HOST'}
             <ArrowRight size={22} />

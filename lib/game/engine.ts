@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { footstepDirection } from './sound-cues.ts';
 import { parachuteModel } from './parachute.ts';
 import { weaponModel } from './weapon-models.ts';
 import { batchIsland } from './render-world.ts';
@@ -54,6 +55,15 @@ export type GameState = RecoveryState & {
   rank: number;
   bots: { x: number; z: number }[];
   dropLoot?: { x: number; y: number; kind: number; distance: number }[];
+  pingPoints?: { id: string; x: number; z: number; label: string }[];
+  footsteps?: { id: string; angle: number; strength: number }[];
+  markers?: {
+    id: string;
+    x: number;
+    y: number;
+    label: string;
+    distance: number;
+  }[];
   healRemaining: number;
   dropping: boolean;
   altitude: number;
@@ -92,11 +102,11 @@ type Bot = {
 };
 type Loot = { mesh: THREE.Group; kind: number; used: boolean };
 export const landmarks = [
-  { x: 18, z: -23, w: 14, d: 12, name: 'SUNSET STATION' },
-  { x: -22, z: -16, w: 14, d: 12, name: 'OLD TOWN' },
-  { x: 30, z: 20, w: 12, d: 10, name: 'THE OUTPOST' },
-  { x: -35, z: 28, w: 12, d: 10, name: 'PALM GROVE' },
-  { x: 2, z: -57, w: 12, d: 9, name: 'NORTH PIER' },
+  { x: 18, z: -23, w: 14, d: 12, name: 'SANDCASTLE SQUARE' },
+  { x: -22, z: -16, w: 14, d: 12, name: 'BUCKET TOWN' },
+  { x: 30, z: 20, w: 12, d: 10, name: 'BLOCK FORT' },
+  { x: -35, z: 28, w: 12, d: 10, name: 'TOY GROVE' },
+  { x: 2, z: -57, w: 12, d: 9, name: 'NORTH RIM' },
 ];
 const names = [
   'Kestrel',
@@ -116,6 +126,21 @@ const names = [
   'Nomad',
 ];
 export class BattleGame {
+  footsteps = new Map<
+    string,
+    { x: number; z: number; until: number; nextAt: number }
+  >();
+  localMarks: {
+    id: string;
+    point: THREE.Vector3;
+    label: string;
+    until: number;
+  }[] = [];
+  isDowned() {
+    return !!this.networkRoom?.players.find(
+      (p) => p.id === this.network?.playerId,
+    )?.downed;
+  }
   state: GameState = {
     phase: 'lobby',
     health: 100,
@@ -127,7 +152,7 @@ export class BattleGame {
     dropping: false,
     altitude: 0,
     threat: 0,
-    killer: 'The island',
+    killer: 'The sandbox',
     deathRemaining: 0,
     survived: 0,
     eliminationPulse: 0,
@@ -302,29 +327,69 @@ export class BattleGame {
   buildWorld() {
     const sea = new THREE.Mesh(
       new THREE.PlaneGeometry(1600, 1600),
-      this.material('#48a7b4', { roughness: 0.3, metalness: 0.15 }),
+      this.material('#9aa66b', { roughness: 1 }),
     );
     sea.rotation.x = -Math.PI / 2;
     sea.position.y = -3.2;
     this.world.add(sea);
     const beach = new THREE.Mesh(
-      new THREE.CylinderGeometry(115, 120, 3, 64),
+      new THREE.BoxGeometry(232, 3, 232),
       this.material('#dfca8d'),
     );
     beach.position.y = -2;
     beach.receiveShadow = true;
     this.world.add(beach);
     const island = new THREE.Mesh(
-      new THREE.CylinderGeometry(107, 113, 5, 64),
-      this.material('#88ab62'),
+      new THREE.BoxGeometry(226, 5, 226),
+      this.material('#e8c780'),
     );
     island.position.y = -2.5;
     island.receiveShadow = true;
     this.world.add(island);
+    // A full-size wooden toy box frames the playable sandy arena.
+    for (const side of [-1, 1]) {
+      this.box(238, 5, 5, '#9d6b40', 0, 1, side * 116);
+      this.box(5, 5, 228, '#ad7949', side * 116, 1, 0);
+      this.box(239, 0.7, 6, '#ce9b64', 0, 3.7, side * 116);
+      this.box(6, 0.7, 228, '#ce9b64', side * 116, 3.7, 0);
+      for (let n = -2; n <= 2; n++) {
+        const screw = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.35, 0.35, 0.08, 8),
+          this.material('#494844'),
+        );
+        screw.position.set(n * 40, 4.1, side * 116);
+        this.world.add(screw);
+      }
+    }
+    // Oversized buckets sit beyond the rim, making the arena feel miniature.
+    for (const [x, z, color] of [
+      [126, -62, '#ee7655'],
+      [-125, 55, '#69a9d0'],
+    ] as const) {
+      const bucket = new THREE.Mesh(
+        new THREE.CylinderGeometry(8, 6, 12, 16, 1, true),
+        this.material(color, { side: THREE.DoubleSide }),
+      );
+      bucket.position.set(x, 3, z);
+      this.world.add(bucket);
+      const rim = new THREE.Mesh(
+        new THREE.TorusGeometry(8, 0.55, 6, 24),
+        this.material(color),
+      );
+      rim.rotation.x = Math.PI / 2;
+      rim.position.set(x, 9, z);
+      this.world.add(rim);
+      const handle = new THREE.Mesh(
+        new THREE.TorusGeometry(8.2, 0.45, 6, 24, Math.PI),
+        this.material('#f1d863'),
+      );
+      handle.position.set(x, 7, z);
+      this.world.add(handle);
+    }
     // Sand paths join the settlements and remain open for movement.
-    this.box(9, 0.05, 184, '#c7bc8a', 0, 0.035, 0);
-    this.box(162, 0.055, 8, '#c7bc8a', 0, 0.04, 4);
-    this.box(6, 0.06, 86, '#c7bc8a', 40, 0.05, -12);
+    this.box(9, 0.05, 184, '#d4ae64', 0, 0.035, 0);
+    this.box(162, 0.055, 8, '#d4ae64', 0, 0.04, 4);
+    this.box(6, 0.06, 86, '#d4ae64', 40, 0.05, -12);
     const building = (
       x: number,
       z: number,
@@ -336,7 +401,18 @@ export class BattleGame {
       const base = this.box(w, h, d, color, x, h / 2, z);
       this.solid(base);
       this.box(w + 0.8, 0.45, d + 0.8, '#f2e0b6', x, h, z);
-      this.box(w + 0.4, 0.28, d + 0.4, '#547c75', x, h + 0.35, z);
+      this.box(w + 0.4, 0.28, d + 0.4, color, x, h + 0.35, z);
+      for (const edge of [-1, 1])
+        for (let n = -1; n <= 1; n++)
+          this.box(
+            1.7,
+            1.1,
+            1.7,
+            '#f1d495',
+            x + n * w * 0.36,
+            h + 0.8,
+            z + edge * d * 0.4,
+          );
       for (let n = -1; n <= 1; n++) {
         this.box(
           1.5,
@@ -380,15 +456,15 @@ export class BattleGame {
         );
       this.box(2.2, 1, 2, '#e2dfc0', x + w * 0.2, h + 0.8, z - 1);
     };
-    building(18, -23, 14, 12, 7.5, '#c77b56');
+    building(18, -23, 14, 12, 7.5, '#e5bd75');
     building(-22, -16, 14, 12, 6, '#e2c884');
-    building(30, 20, 12, 10, 5.7, '#70a6a0');
-    building(-35, 28, 12, 10, 6.6, '#dda274');
-    building(2, -57, 12, 9, 5, '#729d9d');
-    building(-47, -28, 9, 11, 4.5, '#b9bd88');
+    building(30, 20, 12, 10, 5.7, '#65b5c5');
+    building(-35, 28, 12, 10, 6.6, '#e7bc70');
+    building(2, -57, 12, 9, 5, '#e0b365');
+    building(-47, -28, 9, 11, 4.5, '#ed865b');
     building(48, -40, 11, 12, 7.2, '#e1b47c');
-    building(-18, 49, 10, 8, 4.5, '#c3c7a0');
-    building(49, 45, 9, 10, 4.5, '#b8795d');
+    building(-18, 49, 10, 8, 4.5, '#dfb365');
+    building(49, 45, 9, 10, 4.5, '#dc7861');
     building(-56, 7, 11, 9, 5.4, '#669f9b');
     // A stepped clock tower gives the island its silhouette.
     const tower = this.box(7, 17, 7, '#ebc993', 18, 8.5, -23);
@@ -397,7 +473,7 @@ export class BattleGame {
     this.box(6, 4, 6, '#d5a271', 18, 19, -23);
     const roof = new THREE.Mesh(
       new THREE.ConeGeometry(5.3, 3, 4),
-      this.material('#497b78'),
+      this.material('#dfb064'),
     );
     roof.position.set(18, 22.2, -23);
     roof.rotation.y = Math.PI / 4;
@@ -457,7 +533,7 @@ export class BattleGame {
         z = Math.sin(a) * r;
       const rock = new THREE.Mesh(
         new THREE.DodecahedronGeometry(2 + rand() * 3, 0),
-        this.material(i % 2 ? '#9caa8c' : '#c7c4a3'),
+        this.material(i % 2 ? '#c7a775' : '#e0c493'),
       );
       rock.position.set(x, 0.4, z);
       rock.scale.y = 0.65;
@@ -538,7 +614,7 @@ export class BattleGame {
     for (let j = 0; j < 2; j++) {
       const leaf = new THREE.Mesh(
         new THREE.ConeGeometry(h * 0.43 - j * 0.5, h * 0.68, 6),
-        this.material(j ? '#518e65' : '#448263'),
+        this.material(j ? '#80cdb4' : '#53b394'),
       );
       leaf.position.set(x, h * 0.65 + j * h * 0.27, z);
       leaf.rotation.y = rand();
@@ -698,7 +774,8 @@ export class BattleGame {
       this.state.health > 0 &&
       index >= 0 &&
       this.state.owned[index] &&
-      !(this.aiming && index === 2);
+      !(this.aiming && index === 2) &&
+      !this.isDowned();
     this.gunModels?.forEach((model, i) => {
       model.visible = i === index;
     });
@@ -841,13 +918,22 @@ export class BattleGame {
         e.preventDefault();
       this.keys.add(e.code);
       if (e.code === 'KeyR') this.reload();
-      if (e.code === 'KeyE') this.pickup();
+      if (!e.repeat && e.code === 'KeyE') this.interact();
+      if (!e.repeat && e.code === 'KeyG') this.mark();
       if (!e.repeat && e.code === 'KeyQ') this.heal('medkit');
       if (!e.repeat && e.code === 'KeyF') this.heal('shield');
-      if (!e.repeat && e.code === 'KeyX') this.cancelHeal();
+      if (!e.repeat && e.code === 'KeyX') {
+        this.cancelHeal();
+        this.network?.send({ type: 'cancelRevive' });
+      }
       if (['Digit1', 'Digit2', 'Digit3'].includes(e.code))
         this.selectWeapon(Number(e.code.slice(-1)) - 1);
-      if (e.code === 'Space' && !this.state.dropping && this.position.y <= 1.71)
+      if (
+        e.code === 'Space' &&
+        !this.isDowned() &&
+        !this.state.dropping &&
+        this.position.y <= 1.71
+      )
         this.velocityY = 7;
       if (e.code === 'Escape') this.pause();
     }) as EventListener);
@@ -875,6 +961,10 @@ export class BattleGame {
       if (this.state.phase === 'playing') {
         if (e.button === 0) this.shooting = true;
         if (e.button === 2) this.setAiming(true);
+        if (e.button === 1) {
+          e.preventDefault();
+          this.mark();
+        }
       }
     }) as EventListener);
     on(document, 'mouseup', (() => {
@@ -896,13 +986,123 @@ export class BattleGame {
       if (this.state.phase === 'playing') this.pause();
     }) as EventListener);
   }
+  hearStep(id: string, x: number, z: number) {
+    if (this.state.phase !== 'playing' || this.state.dropping) return;
+    const cue = footstepDirection(
+      { x: this.position.x, z: this.position.z, yaw: this.yaw },
+      { x, z },
+    );
+    if (!cue) return;
+    const previous = this.footsteps.get(id);
+    this.footsteps.set(id, {
+      x,
+      z,
+      until: this.time + 0.55,
+      nextAt: previous?.nextAt ?? 0,
+    });
+    if ((previous?.nextAt ?? 0) > this.time) return;
+    this.footsteps.get(id)!.nextAt = this.time + 0.38;
+    if (this.muted || !this.audio) return;
+    const osc = this.audio.createOscillator(),
+      gain = this.audio.createGain(),
+      pan = this.audio.createStereoPanner();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(105, this.audio.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(
+      35,
+      this.audio.currentTime + 0.09,
+    );
+    gain.gain.setValueAtTime(0.035 * cue.strength, this.audio.currentTime);
+    gain.gain.exponentialRampToValueAtTime(
+      0.001,
+      this.audio.currentTime + 0.09,
+    );
+    pan.pan.value = Math.sin((cue.angle * Math.PI) / 180);
+    osc.connect(gain);
+    gain.connect(pan);
+    pan.connect(this.audio.destination);
+    osc.start();
+    osc.stop(this.audio.currentTime + 0.1);
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+      pan.disconnect();
+    };
+  }
+  interact() {
+    const me = this.networkRoom?.players.find(
+      (p) => p.id === this.network?.playerId,
+    );
+    const target =
+      this.networkRoom?.mode === 'duos' && me && !me.downed
+        ? this.networkRoom.players.find(
+            (p) =>
+              p.id !== me.id &&
+              p.team === me.team &&
+              p.downed &&
+              p.health > 0 &&
+              Math.hypot(p.x - me.x, p.z - me.z) <= 3,
+          )
+        : null;
+    if (target) {
+      this.network?.send({ type: 'revive', target: target.id });
+      return;
+    }
+    if (!this.isDowned()) this.pickup();
+  }
+  mark() {
+    if (this.state.phase !== 'playing') return;
+    this.camera.updateMatrixWorld();
+    this.ray.setFromCamera(new THREE.Vector2(0, 0), this.camera);
+    const hits = this.ray.intersectObjects(
+      [...this.solids, ...this.bots.filter((b) => b.hp > 0).map((b) => b.mesh)],
+      true,
+    );
+    const hit = hits[0];
+    let point: THREE.Vector3 | undefined = hit ? hit.point.clone() : undefined;
+    if (!point)
+      point =
+        this.ray.ray.intersectPlane(
+          new THREE.Plane(new THREE.Vector3(0, 1, 0), 0),
+          new THREE.Vector3(),
+        ) ?? undefined;
+    if (
+      !point ||
+      point.distanceTo(this.position) > 180 ||
+      Math.hypot(point.x, point.z) > 110
+    ) {
+      this.notice('Aim at a nearby location to ping.');
+      return;
+    }
+    const loot = this.loot.find(
+      (l) => !l.used && l.mesh.position.distanceTo(point!) < 4,
+    );
+    const label =
+      hit?.object.userData.bot !== undefined
+        ? 'Enemy'
+        : loot
+          ? 'Loot'
+          : 'Go here';
+    point.y += 1;
+    if (this.network)
+      this.network.send({
+        type: 'mark',
+        point: [point.x, point.y, point.z],
+        label,
+      });
+    else
+      this.localMarks = [{ id: 'local', point, label, until: this.time + 8 }];
+    this.sound(650, 0.08, 0.035, 'sine');
+    this.notice(`${label} marked`);
+  }
   setAiming(aiming: boolean) {
     this.aiming =
       aiming &&
       this.state.phase === 'playing' &&
       this.state.weapon >= 0 &&
       !this.state.healing &&
-      !this.state.dropping;
+      !this.state.dropping &&
+      !this.isDowned();
     this.showWeapon();
     this.emit();
   }
@@ -946,7 +1146,7 @@ export class BattleGame {
         dropping: true,
         altitude: DROP_HEIGHT,
         threat: 0,
-        killer: 'The island',
+        killer: 'The sandbox',
         deathRemaining: 0,
         survived: 0,
         eliminationPulse: 0,
@@ -1189,7 +1389,7 @@ export class BattleGame {
       !this.network ||
       this.state.health > 0 ||
       !this.networkRoom ||
-      !['playing', 'finished'].includes(this.networkRoom.phase)
+      !['countdown', 'playing', 'finished'].includes(this.networkRoom.phase)
     )
       return;
     const alive = this.networkRoom.players.filter((p) => p.health > 0);
@@ -1248,7 +1448,12 @@ export class BattleGame {
     osc.stop(this.audio.currentTime + duration);
   }
   shoot() {
-    if (this.state.dropping || this.state.phase !== 'playing') return;
+    if (
+      this.state.dropping ||
+      this.state.phase !== 'playing' ||
+      this.isDowned()
+    )
+      return;
     if (this.state.weapon < 0 || !this.state.owned[this.state.weapon]) return;
     this.cancelHeal(false);
     const i = this.state.weapon,
@@ -1349,7 +1554,7 @@ export class BattleGame {
       this.state.eliminationPulse = 1;
       this.notice(`Eliminated ${b.name}`);
     }
-    this.addFeed(`${player ? 'You' : 'The island'} eliminated ${b.name}`);
+    this.addFeed(`${player ? 'You' : 'The sandbox'} eliminated ${b.name}`);
     this.state.alive = this.bots.filter((b) => b.hp > 0).length + 1;
   }
   damage(amount: number, from?: THREE.Vector3, killer = 'The storm') {
@@ -1518,6 +1723,7 @@ export class BattleGame {
         b.seed += dt * 3;
         this.move(p, Math.cos(angle) * speed, -Math.sin(angle) * speed);
       }
+      if (p.distanceToSquared(old) > 0.0001) this.hearStep(b.name, p.x, p.z);
       b.mesh.rotation.y = angle;
       b.mesh.children[4].rotation.x = Math.sin(this.time * 9 + b.seed) * 0.3;
       b.mesh.children[6].rotation.x = -Math.sin(this.time * 9 + b.seed) * 0.3;
@@ -1678,9 +1884,11 @@ export class BattleGame {
           ? 0
           : this.state.dropping
             ? 9
-            : this.keys.has('ShiftLeft')
-              ? 11
-              : 7) *
+            : this.isDowned()
+              ? 2
+              : this.keys.has('ShiftLeft')
+                ? 11
+                : 7) *
         (this.state.healing ? 0.5 : this.aiming ? 0.6 : 1) *
         dt;
       this.move(
@@ -1702,7 +1910,7 @@ export class BattleGame {
             this.safePosition(this.position.x, this.position.z),
           );
           this.position.y = 1.7;
-          this.notice('Landed. Find a weapon and press E.');
+          this.notice('Feet in the sand. Find a weapon and press E.');
           this.sound(110, 0.18, 0.035, 'triangle');
         }
       } else {
@@ -1719,6 +1927,7 @@ export class BattleGame {
         this.correction.sub(step);
       }
       this.camera.position.copy(this.position);
+      if (this.isDowned()) this.camera.position.y -= 0.95;
       this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
       this.camera.fov = THREE.MathUtils.lerp(
         this.camera.fov,
@@ -1889,6 +2098,51 @@ export class BattleGame {
     this.frame = requestAnimationFrame(this.tick);
   }
   emit() {
+    this.state.footsteps = [];
+    for (const [id, cue] of this.footsteps ?? []) {
+      if (cue.until < this.time) {
+        this.footsteps.delete(id);
+        continue;
+      }
+      const direction = footstepDirection(
+        { x: this.position.x, z: this.position.z, yaw: this.yaw },
+        cue,
+      );
+      if (direction && this.state.phase === 'playing')
+        this.state.footsteps.push({ id, ...direction });
+    }
+    const marks = this.network
+      ? (this.networkRoom?.events ?? [])
+          .filter((e) => e.type === 'mark' && e.end)
+          .map((e) => ({
+            id: e.id,
+            point: new THREE.Vector3(...e.end!),
+            label: e.label ?? 'Go here',
+            until: this.time + 1,
+          }))
+      : (this.localMarks ?? []).filter((m) => m.until > this.time);
+    this.state.pingPoints = marks.map((m) => ({
+      id: m.id,
+      x: m.point.x,
+      z: m.point.z,
+      label: m.label,
+    }));
+    this.state.markers = marks
+      .map((m) => {
+        const point = m.point.clone().project(this.camera);
+        return {
+          id: m.id,
+          x: (point.x + 1) * 50,
+          y: (1 - point.y) * 50,
+          label: m.label,
+          distance: Math.round(m.point.distanceTo(this.position)),
+          z: point.z,
+        };
+      })
+      .filter(
+        (m) =>
+          m.z > -1 && m.z < 1 && m.x > 2 && m.x < 98 && m.y > 5 && m.y < 90,
+      );
     this.state.aiming = this.aiming;
     this.state.dropLoot = [];
     if (this.state.dropping && this.state.phase === 'playing') {
@@ -1977,6 +2231,7 @@ export class BattleGame {
   }
   applyNetworkSnapshot(room: RoomSnapshot, acknowledgedPose?: PlayerPose) {
     if (!this.network) return;
+    const previousRoom = this.networkRoom;
     this.networkRoom = room;
     const me = room.players.find((p) => p.id === this.network?.playerId);
     if (!me) return;
@@ -1989,9 +2244,11 @@ export class BattleGame {
     if (newRound) {
       this.networkRound = room.round;
       this.networkEvents.clear();
+      this.footsteps.clear();
+      this.localMarks = [];
       this.state.phase = 'paused';
       this.killerId = null;
-      this.state.killer = 'The island';
+      this.state.killer = 'The sandbox';
       this.state.deathRemaining = 0;
       this.state.threat = 0;
       this.state.survived = 0;
@@ -2008,7 +2265,7 @@ export class BattleGame {
       this.state.hit = 0;
       this.state.hurt = 0;
       this.state.pickup = '';
-      this.state.notice = 'Click Enter match when you are ready.';
+      this.state.notice = 'The sandbox is ready. Enter the match.';
       this.position.set(me.x, me.y, me.z);
       this.yaw = me.yaw;
       this.pitch = -0.6;
@@ -2026,15 +2283,31 @@ export class BattleGame {
     this.remoteTargets = remotes.map((p, i) => {
       const b = this.bots[i];
       if (newRound) b.mesh.position.set(p.x, p.y - 1.7, p.z);
-      if (b.name !== p.name) {
+      const teammate = room.mode === 'duos' && me.team === p.team;
+      const label = `${teammate ? '◆ ' : ''}${p.name}${p.downed ? ' · DOWN' : ''}`;
+      const previous = previousRoom?.players.find((q) => q.id === p.id);
+      if (
+        !newRound &&
+        !teammate &&
+        !p.dropping &&
+        p.y <= 1.9 &&
+        !p.downed &&
+        p.health > 0 &&
+        previous &&
+        Math.hypot(p.x - previous.x, p.z - previous.z) > 0.025
+      )
+        this.hearStep(p.id, p.x, p.z);
+      b.mesh.scale.y = p.downed ? 0.38 : 1;
+      if (b.name !== label) {
         if (b.tag) {
           b.mesh.remove(b.tag);
           b.tag.material.map?.dispose();
           b.tag.material.dispose();
         }
-        b.tag = this.nameTag(p.name);
+        b.tag = this.nameTag(label);
         if (b.tag) b.mesh.add(b.tag);
-        b.name = p.name;
+        b.name = label;
+        if (b.tag) b.tag.material.color.set(teammate ? '#7effd1' : '#ffffff');
       }
       let held = b.mesh.getObjectByName('Bot weapon');
       if (p.weapon >= 0 && held?.userData.weapon !== p.weapon) {
@@ -2050,8 +2323,9 @@ export class BattleGame {
         held.position.set(0.35, 1.35, 0.25);
         b.mesh.add(held);
       }
-      if (held) held.visible = p.weapon >= 0;
-      if (p.health <= 0 && b.hp > 0) this.beginBotDeath(b);
+      if (held) held.visible = p.weapon >= 0 && !p.downed;
+      if (p.health <= 0 && b.hp > 0 && !p.spectator && !newRound)
+        this.beginBotDeath(b);
       b.hp = p.health;
       b.shield = p.shield;
       b.dropping = p.dropping;
@@ -2070,7 +2344,11 @@ export class BattleGame {
         } else this.correction.set(correctionX, 0, correctionZ);
       }
     }
-    if (me.health < this.state.health || me.shield < this.state.shield)
+    if (
+      !newRound &&
+      !me.spectator &&
+      (me.health < this.state.health || me.shield < this.state.shield)
+    )
       this.state.hurt = 0.3;
     if (me.dropping)
       this.position.y = THREE.MathUtils.lerp(this.position.y, me.y, 0.5);
@@ -2078,7 +2356,7 @@ export class BattleGame {
       this.position.set(me.x, me.y, me.z);
       this.velocityY = 0;
       this.correction.set(0, 0, 0);
-      this.notice('Landed. Find a weapon and press E.');
+      this.notice('Feet in the sand. Find a weapon and press E.');
     }
     this.state.dropping = me.dropping && me.health > 0;
     this.state.altitude = Math.max(0, me.y - 1.7);
@@ -2164,6 +2442,22 @@ export class BattleGame {
               -180) /
             Math.PI;
       }
+      if (
+        (e.type === 'down' || e.type === 'revive') &&
+        (e.player === me.id || e.target === me.id)
+      ) {
+        const name =
+          room.players.find((p) => p.id === e.target)?.name ?? 'Teammate';
+        this.notice(
+          e.type === 'down'
+            ? e.target === me.id
+              ? 'Downed! Your teammate can revive you.'
+              : `Downed ${name}`
+            : e.target === me.id
+              ? 'Revived. Find cover!'
+              : `Revived ${name}`,
+        );
+      }
       if (e.type === 'heal' && e.player === me.id) {
         this.notice(`${e.item === 'medkit' ? 'Health' : 'Shield'} restored`);
         this.sound(740, 0.2, 0.045, 'sine');
@@ -2203,7 +2497,8 @@ export class BattleGame {
       me.health <= 0 &&
       this.state.phase !== 'lost' &&
       this.state.phase !== 'spectating' &&
-      this.state.phase !== 'dying'
+      this.state.phase !== 'dying' &&
+      !me.spectator
     ) {
       this.finish(false);
       if (me.diedAt)
@@ -2211,10 +2506,19 @@ export class BattleGame {
     }
     if (
       room.phase === 'finished' &&
-      room.winner === me.id &&
+      (room.winner === me.id ||
+        (room.mode === 'duos' &&
+          !me.spectator &&
+          room.winningTeam != null &&
+          room.winningTeam === me.team)) &&
       this.state.phase !== 'won'
     )
       this.finish(true);
+    if (me.spectator && this.state.phase === 'paused') {
+      if (room.phase === 'countdown') this.state.phase = 'spectating';
+      this.spectate(0);
+      if (!this.state.spectator) this.state.phase = 'lost';
+    }
     if (
       ['lobby', 'paused', 'won', 'lost'].includes(this.state.phase) ||
       newRound

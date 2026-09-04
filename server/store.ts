@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
+import { activeRoom, ACTIVE_ROOMS_QUERY } from './directory.ts';
 import {
   addMember,
   advance,
@@ -19,6 +20,11 @@ pool.on('error', (error) =>
 );
 export const hash = (token: string) =>
   createHash('sha256').update(token).digest('hex');
+export async function listRooms() {
+  const now = Date.now();
+  const { rows } = await pool.query(ACTIVE_ROOMS_QUERY, [now - 15000]);
+  return rows.map((row) => activeRoom(row.state as Room, now)).filter(Boolean);
+}
 export async function transact<T>(
   code: string,
   fn: (room: Room) => T,

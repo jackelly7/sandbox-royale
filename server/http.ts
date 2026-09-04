@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { activeRoom, ACTIVE_ROOMS_QUERY } from './directory.ts';
 import {
   addMember,
   advance,
@@ -10,6 +11,7 @@ import {
   GameError,
   parseCommand,
   snapshot,
+  forViewer,
   type Room,
 } from './model.ts';
 const hash = (value: string) =>
@@ -56,6 +58,17 @@ export async function multiplayerRequest(
     }
     if (!data || typeof data !== 'object')
       throw new GameError('Invalid request.');
+    if (data.type === 'list') {
+      const rows = await sql.query(ACTIVE_ROOMS_QUERY, [now - 15000]);
+      return Response.json(
+        {
+          rooms: rows
+            .map((row) => activeRoom(row.state as Room, now))
+            .filter(Boolean),
+        },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
     if (data.type === 'create' || data.type === 'join') {
       const name = cleanName(data.name),
         ip =
@@ -206,7 +219,7 @@ export async function multiplayerRequest(
     }
     const own = room.players.find((p) => p.id === playerId);
     const result = {
-      room: snapshot(room, Date.now()),
+      room: forViewer(snapshot(room, Date.now()), playerId),
       ack: own?.lastCommand ?? Math.max(0, ...actions.map((a) => a.seq)),
       error: own?.commandError ?? '',
     };
