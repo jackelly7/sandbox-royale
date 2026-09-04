@@ -39,3 +39,6 @@ next-env.d.ts
 
 # compiler cache
 *.tsbuildinfo
+
+# Local runtime credentials
+.dev.vars*

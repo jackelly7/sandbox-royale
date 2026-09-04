@@ -1796,3 +1796,258 @@ kbd {
     animation-duration: 2s;
   }
 }
+
+.friend-launch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #a0d6bf1c;
+  border: 1px solid #a4ddbd88;
+  color: #d9f1d7;
+  padding: 11px 16px;
+  margin-top: 21px;
+  font-size: 12px;
+  letter-spacing: 1px;
+  font-weight: 700;
+}
+.friend-launch:hover {
+  background: #a0d6bf33;
+}
+.friends-content {
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+}
+.friends-content label {
+  font-size: 14px;
+  color: #d1e0ce;
+}
+.room-input {
+  height: 44px;
+  border-radius: 2px;
+  font-size: 16px;
+  background: #133239;
+  border-color: #718d8066;
+}
+.friends-content .deploy-button {
+  font-size: 24px;
+  min-height: 60px;
+  height: 60px;
+  margin-top: 3px;
+}
+.room-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: #a0bcae;
+  margin: 9px 0;
+}
+.room-divider:before,
+.room-divider:after {
+  content: '';
+  height: 1px;
+  background: #8eaf9855;
+  flex: 1;
+}
+.join-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+.code-input {
+  text-transform: uppercase;
+  letter-spacing: 5px;
+  font-family: var(--font-display);
+  font-size: 25px;
+}
+.join-button {
+  width: 52px;
+  background: #a1d6bf;
+  color: #163c42;
+  border: 0;
+  display: grid;
+  place-items: center;
+}
+.room-error {
+  background: #8c4a4350;
+  padding: 12px;
+  border: 1px solid #b5795c88;
+  color: #ffd0b6;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}
+.room-status {
+  font-size: 13px;
+  color: var(--sun);
+}
+.room-share {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: #0f303633;
+  padding: 15px;
+  border: 1px solid #7b9b8533;
+}
+.room-share > div > span {
+  font-size: 9px;
+  letter-spacing: 1.6px;
+  color: #abc5b0;
+  display: block;
+}
+.room-share strong {
+  font-size: 38px;
+  letter-spacing: 5px;
+  font-family: var(--font-display);
+  color: var(--sun);
+  line-height: 1.35;
+}
+.room-share .secondary-button {
+  width: auto;
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 10px;
+  margin: 0;
+}
+.room-connection {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #adceb9;
+}
+.room-connection > span {
+  margin-left: auto;
+}
+.room-players {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+  max-height: 230px;
+  overflow-y: auto;
+}
+.room-players li {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  border-bottom: 1px solid #8eaf9829;
+  padding: 10px 0;
+  font-size: 14px;
+}
+.room-avatar {
+  height: 29px;
+  width: 29px;
+  background: #80a99544;
+  border: 1px solid #a1bfaa4f;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-display);
+  font-weight: 700;
+}
+.room-players small {
+  font-size: 8px;
+  color: #a8c5b5;
+  margin-left: 8px;
+}
+.room-players li > svg {
+  color: var(--sun);
+}
+.room-players li > span:last-child {
+  margin-left: auto;
+  font-size: 8px;
+  letter-spacing: 0.7px;
+}
+.connected-text {
+  color: var(--mint);
+}
+.disconnected-text {
+  color: #e6b888;
+}
+.room-winner {
+  font-size: 15px;
+  color: var(--sun);
+  padding: 10px 0;
+}
+.friends-content > .text-button {
+  margin-top: 0;
+}
+.network-badge {
+  position: absolute;
+  bottom: 122px;
+  left: 30px;
+  font-size: 9px;
+  letter-spacing: 1px;
+  color: #d4dfc8;
+  background: #153c4277;
+  padding: 7px 10px;
+  z-index: 10;
+}
+.network-badge span {
+  color: var(--mint);
+  margin-left: 12px;
+}
+.match-countdown {
+  position: absolute;
+  top: 25%;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--font-display);
+  font-size: 85px;
+  line-height: 1;
+  color: var(--sun);
+  z-index: 15;
+  text-align: center;
+  text-shadow: 0 3px 10px #163c4277;
+}
+.match-countdown span {
+  display: block;
+  font-family: var(--font-body);
+  font-size: 11px;
+  letter-spacing: 3px;
+  margin-top: 8px;
+}
+@media (max-width: 700px) {
+  .friend-launch {
+    font-size: 10px;
+    margin-top: 16px;
+    padding: 9px 12px;
+  }
+  .match-facts {
+    margin-top: 16px;
+  }
+  .room-share {
+    padding: 11px;
+  }
+  .room-share strong {
+    font-size: 33px;
+    letter-spacing: 3px;
+  }
+  .room-share .secondary-button {
+    font-size: 10px;
+    padding: 9px;
+  }
+  .network-badge {
+    bottom: 110px;
+    left: 18px;
+    font-size: 7px;
+  }
+  .room-players {
+    max-height: 195px;
+  }
+}
+@media (max-height: 750px) and (min-width: 800px) {
+  .friend-launch {
+    margin-top: 14px;
+    padding: 8px 12px;
+  }
+  .match-facts {
+    margin-top: 13px;
+  }
+  h1 {
+    font-size: clamp(55px, 6vw, 85px);
+  }
+}

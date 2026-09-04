@@ -9,12 +9,19 @@
     "dev": "vinext dev",
     "build": "vinext build",
     "start": "wrangler dev --config dist/server/wrangler.json",
-    "lint": "oxlint app lib tests vite.config.ts next.config.ts",
+    "lint": "oxlint app lib server scripts tests components/friends-room.tsx vite.config.ts next.config.ts",
     "format": "oxfmt",
-    "test": "node --experimental-strip-types --test tests/*.test.ts"
+    "test": "node --experimental-strip-types --test tests/*.test.ts",
+    "server:dev": "node --experimental-strip-types server/local.ts",
+    "server:build": "node scripts/build-server.mjs",
+    "test:multiplayer": "node scripts/test-http-multiplayer.mjs",
+    "map:export": "node --experimental-strip-types scripts/export-map.ts",
+    "test:websocket": "node scripts/test-multiplayer.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",
+    "@neon/functions": "^0.9.0",
+    "@neondatabase/serverless": "^1.1.0",
     "@shadcn/react": "0.3.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -23,6 +30,7 @@
     "embla-carousel-react": "8.5.2",
     "input-otp": "1.4.2",
     "lucide-react": "1.31.0",
+    "pg": "^8.23.0",
     "react": "19.2.6",
     "react-day-picker": "9.8.1",
     "react-dom": "19.2.6",
@@ -41,18 +49,22 @@
     "@openai/sites-vite-plugin": "0.2.0",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
+    "@types/pg": "^8.23.1",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
     "@types/three": "^0.185.4",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
+    "esbuild": "^0.28.2",
     "oxfmt": "0.61.0",
     "oxlint": "1.76.0",
     "oxlint-tsgolint": "7.0.2001",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "wrangler": "4.92.0",
+    "ws": "^8.21.3"
   },
   "type": "module"
 }

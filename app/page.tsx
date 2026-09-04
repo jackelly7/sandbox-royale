@@ -35,6 +35,13 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import type { BattleGame, GameState } from '@/lib/game/engine';
+import { FriendsRoom } from '@/components/friends-room';
+import { MultiplayerClient } from '@/lib/game/network';
+import type {
+  RoomSnapshot,
+  RoomSession,
+  ConnectionStatus,
+} from '@/lib/game/multiplayer';
 import { WEAPONS } from '@/lib/game/rules';
 
 const initial: GameState = {
@@ -206,13 +213,65 @@ export default function Home() {
   const [state, setState] = useState(initial),
     [ready, setReady] = useState(false),
     [error, setError] = useState('');
-  const [panel, setPanel] = useState<'controls' | 'settings' | 'map' | null>(
-    null,
-  );
+  const [panel, setPanel] = useState<
+    'controls' | 'settings' | 'map' | 'friends' | null
+  >(null);
   const [muted, setMuted] = useState(false),
     [sensitivity, setSensitivity] = useState(1),
     [touch, setTouch] = useState(false),
     [best, setBest] = useState(0);
+  const client = useRef<MultiplayerClient | null>(null);
+  const [room, setRoom] = useState<RoomSnapshot | null>(null),
+    [session, setSession] = useState<RoomSession | null>(null),
+    [connection, setConnection] = useState<ConnectionStatus>('offline'),
+    [roomBusy, setRoomBusy] = useState(false),
+    [roomError, setRoomError] = useState(''),
+    [inviteCode, setInviteCode] = useState('');
+  const roomPhase = useRef('waiting');
+  const leaveRoom = () => {
+    client.current?.close();
+    client.current = null;
+    game.current?.detachNetwork();
+    setRoom(null);
+    setSession(null);
+    setRoomError('');
+    setPanel(null);
+  };
+  const enterRoom = async (name: string, code?: string) => {
+    if (!game.current) return;
+    setRoomBusy(true);
+    setRoomError('');
+    try {
+      const joined = await MultiplayerClient.enter(name, code);
+      setSession(joined);
+      roomPhase.current = 'waiting';
+      client.current = new MultiplayerClient(
+        joined,
+        (next, acknowledgedPose) => {
+          setRoom(next);
+          game.current?.applyNetworkSnapshot(next, acknowledgedPose);
+          if (next.phase === 'countdown' && roomPhase.current !== 'countdown')
+            setPanel(null);
+          roomPhase.current = next.phase;
+        },
+        setConnection,
+        setRoomError,
+      );
+      game.current.attachNetwork(joined.playerId, (command) =>
+        client.current?.send(command),
+      );
+    } catch (e) {
+      setRoomError(
+        e instanceof Error ? e.message : 'Could not connect. Try again.',
+      );
+    } finally {
+      setRoomBusy(false);
+    }
+  };
+  const backToLobby = () => {
+    if (client.current) leaveRoom();
+    else game.current?.lobby();
+  };
   const lookTouch = useRef<{ x: number; y: number } | null>(null);
   const stick = useRef<{ x: number; y: number } | null>(null);
   const [stickPos, setStickPos] = useState({ x: 0, y: 0 });
@@ -240,6 +299,13 @@ export default function Home() {
             }
           });
           setReady(true);
+          const invite = new URLSearchParams(window.location.search).get(
+            'room',
+          );
+          if (invite && /^[A-Z2-9]{6}$/i.test(invite)) {
+            setInviteCode(invite.toUpperCase());
+            setPanel('friends');
+          }
         } catch (e) {
           console.error(e);
           setError(
@@ -250,6 +316,7 @@ export default function Home() {
       .catch(() => setError('The game could not load. Refresh to try again.'));
     return () => {
       disposed = true;
+      client.current?.close();
       game.current?.destroy();
       game.current = null;
     };
@@ -295,7 +362,8 @@ export default function Home() {
               LASTLIGHT<span className="brand-dot">®</span>
             </Link>
             <div className="header-mode">
-              <span className="live-dot" /> SOLO BATTLE ROYALE
+              <span className="live-dot" />{' '}
+              {session ? `FRIEND ROOM · ${session.code}` : 'BATTLE ROYALE'}
             </div>
             <div className="header-actions">
               <button
@@ -337,10 +405,21 @@ export default function Home() {
                 <br />
                 Your next close call starts here.
               </p>
+              <button
+                className="friend-launch"
+                disabled={!ready}
+                onClick={() => setPanel('friends')}
+              >
+                <Users size={17} />
+                {session ? 'OPEN FRIEND ROOM' : 'PLAY WITH FRIENDS'}
+                <ArrowRight size={17} />
+              </button>
               <div className="match-facts">
                 <span>
                   <Users size={16} />
-                  16 combatants
+                  {session
+                    ? `${room?.players.length ?? 1} friends`
+                    : '16 combatants'}
                 </span>
                 <span>
                   <Crosshair size={16} />
@@ -392,9 +471,13 @@ export default function Home() {
               </div>
               <div>
                 <div className="mode-label">
-                  SOLO <span>BATTLE ROYALE</span>
+                  {session ? 'FRIENDS' : 'SOLO'} <span>BATTLE ROYALE</span>
                 </div>
-                <p>You against 15 AI rivals.</p>
+                <p>
+                  {session
+                    ? `Room ${session.code} · ${room?.players.length ?? 1}/8 players`
+                    : 'You against 15 AI rivals.'}
+                </p>
               </div>
               <span className="mode-check">
                 <Check size={17} />
@@ -402,11 +485,17 @@ export default function Home() {
             </div>
             <button
               className="deploy-button"
-              onClick={start}
+              onClick={() => (session ? setPanel('friends') : start())}
               disabled={!ready || !!error}
             >
               <span>
-                {error ? 'UNAVAILABLE' : ready ? 'DROP IN' : 'PREPARING ISLAND'}
+                {error
+                  ? 'UNAVAILABLE'
+                  : ready
+                    ? session
+                      ? 'OPEN ROOM'
+                      : 'DROP IN SOLO'
+                    : 'PREPARING ISLAND'}
               </span>
               {ready ? (
                 <ArrowRight size={28} />
@@ -432,6 +521,20 @@ export default function Home() {
             <span>BUILT FOR THE LAST ONE STANDING.</span>
           </div>
         </>
+      )}
+      {session && !lobby && (
+        <div className="network-badge">
+          ROOM {session.code}
+          <span>
+            {connection === 'connected' ? 'LIVE' : connection.toUpperCase()}
+          </span>
+        </div>
+      )}
+      {room?.phase === 'countdown' && playing && (
+        <div className="match-countdown">
+          {Math.max(1, Math.ceil((room.startAt - room.now) / 1000))}
+          <span>GET READY</span>
+        </div>
       )}
       {!lobby && (
         <>
@@ -641,12 +744,19 @@ export default function Home() {
       {state.phase === 'paused' && (
         <section className="pause-overlay">
           <div className="pause-panel">
-            <div className="eyebrow">TAKE A BREATHER</div>
-            <h2>MATCH PAUSED.</h2>
-            <p>The island can wait.</p>
+            <div className="eyebrow">
+              {session ? 'FRIEND MATCH' : 'TAKE A BREATHER'}
+            </div>
+            <h2>{session ? 'READY TO DROP?' : 'MATCH PAUSED.'}</h2>
+            <p>
+              {session
+                ? 'The match keeps running while this menu is open.'
+                : 'The island can wait.'}
+            </p>
             {state.notice.includes('mouse') && <p>{state.notice}</p>}
             <button className="deploy-button" onClick={start}>
-              RESUME <Play size={22} fill="currentColor" />
+              {session ? 'ENTER MATCH' : 'RESUME'}{' '}
+              <Play size={22} fill="currentColor" />
             </button>
             <button
               className="secondary-button"
@@ -662,10 +772,7 @@ export default function Home() {
               <Gamepad2 size={18} />
               Controls
             </button>
-            <button
-              className="text-button"
-              onClick={() => game.current?.lobby()}
-            >
+            <button className="text-button" onClick={backToLobby}>
               <ArrowLeft size={16} />
               Leave match
             </button>
@@ -711,13 +818,13 @@ export default function Home() {
                 <span>SURVIVED</span>
               </div>
             </div>
-            <button className="deploy-button" onClick={start}>
-              DROP AGAIN <RotateCcw size={24} />
-            </button>
             <button
-              className="text-button"
-              onClick={() => game.current?.lobby()}
+              className="deploy-button"
+              onClick={() => (session ? setPanel('friends') : start())}
             >
+              {session ? 'BACK TO ROOM' : 'DROP AGAIN'} <RotateCcw size={24} />
+            </button>
+            <button className="text-button" onClick={backToLobby}>
               <ArrowLeft size={16} />
               Back to lobby
             </button>
@@ -739,19 +846,41 @@ export default function Home() {
           className={`game-dialog ${panel === 'map' ? 'map-dialog' : ''}`}
         >
           <DialogTitle>
-            {panel === 'controls'
-              ? 'KNOW YOUR MOVES.'
-              : panel === 'settings'
-                ? 'MAKE IT YOURS.'
-                : 'KNOW THE ISLAND.'}
+            {panel === 'friends'
+              ? 'BRING YOUR FRIENDS.'
+              : panel === 'controls'
+                ? 'KNOW YOUR MOVES.'
+                : panel === 'settings'
+                  ? 'MAKE IT YOURS.'
+                  : 'KNOW THE ISLAND.'}
           </DialogTitle>
           <DialogDescription>
-            {panel === 'controls'
-              ? 'Find supplies, stay inside the storm, and outlast all 15 rivals.'
-              : panel === 'settings'
-                ? 'Set up your next drop.'
-                : 'Lastlight Island. Learn the routes. Find your cover.'}
+            {panel === 'friends'
+              ? 'One room. One island. One winner.'
+              : panel === 'controls'
+                ? 'Find supplies, stay inside the storm, and outlast your rivals.'
+                : panel === 'settings'
+                  ? 'Set up your next drop.'
+                  : 'Lastlight Island. Learn the routes. Find your cover.'}
           </DialogDescription>
+          {panel === 'friends' && (
+            <FriendsRoom
+              room={room}
+              session={session}
+              status={connection}
+              busy={roomBusy}
+              error={roomError}
+              inviteCode={inviteCode}
+              enter={(name, code) => {
+                void enterRoom(name, code);
+              }}
+              leave={leaveRoom}
+              command={(type) => {
+                setRoomError('');
+                client.current?.send({ type });
+              }}
+            />
+          )}
           {panel === 'controls' && (
             <>
               <div className="controls-grid">

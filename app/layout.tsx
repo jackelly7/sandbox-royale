@@ -12,9 +12,9 @@ const body = DM_Sans({
   weight: ['400', '500', '600', '700'],
 });
 export const metadata: Metadata = {
-  title: 'LASTLIGHT | Solo Battle Royale',
+  title: 'LASTLIGHT | Battle Royale',
   description:
-    'Drop onto Lastlight Island. Gear up, outrun the storm, and outlast 15 rivals in a first-person 3D battle royale.',
+    'Play a 3D battle royale with friends. Create a room, share the code, and outlast everyone on Lastlight Island.',
 };
 export default function RootLayout({
   children,

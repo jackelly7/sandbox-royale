@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import type { Command, RoomSnapshot, PlayerPose } from './multiplayer.ts';
 import {
   BOT_COUNT,
   WEAPONS,
@@ -127,6 +128,12 @@ export class BattleGame {
   tracers: { mesh: THREE.Line; life: number }[] = [];
   destroyed = false;
   onState: (state: GameState) => void;
+  network: { playerId: string; send: (command: Command) => void } | null = null;
+  networkRoom: RoomSnapshot | null = null;
+  networkRound = 0;
+  networkTime = 0;
+  networkEvents = new Set<string>();
+  remoteTargets: THREE.Vector3[] = [];
   container: HTMLElement;
   constructor(container: HTMLElement, onState: (state: GameState) => void) {
     this.container = container;
@@ -137,7 +144,7 @@ export class BattleGame {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.3;
@@ -563,13 +570,13 @@ export class BattleGame {
     this.gun.add(this.flash);
     this.gun.visible = false;
   }
-  resetBots() {
+  resetBots(count = BOT_COUNT) {
     for (const b of this.bots) {
       this.world.remove(b.mesh);
       this.disposeObject(b.mesh);
     }
     this.bots = [];
-    for (let i = 0; i < BOT_COUNT; i++) {
+    for (let i = 0; i < count; i++) {
       const g = new THREE.Group(),
         color = ['#d77a5c', '#638bad', '#bcaa74', '#925f83'][i % 4];
       this.box(0.72, 0.88, 0.4, color, 0, 1.25, 0, g);
@@ -581,7 +588,7 @@ export class BattleGame {
         this.box(0.24, 0.65, 0.26, color, s * 0.49, 1.29, 0.1, g);
       }
       this.box(0.15, 0.17, 0.8, '#273f43', 0.32, 1.32, 0.43, g);
-      const a = (i / BOT_COUNT) * Math.PI * 2,
+      const a = (i / count) * Math.PI * 2,
         r = 48 + (i % 4) * 11;
       g.position.copy(this.safePosition(Math.sin(a) * r, Math.cos(a) * r));
       this.world.add(g);
@@ -675,7 +682,7 @@ export class BattleGame {
     this.camera.updateProjectionMatrix();
   }
   async start(touch = false) {
-    if (this.state.phase !== 'paused') {
+    if (this.state.phase !== 'paused' && !this.network) {
       this.state = {
         ...this.state,
         health: 100,
@@ -754,6 +761,7 @@ export class BattleGame {
   selectWeapon(index: number) {
     if (index < 0 || index > 2) return;
     this.state.weapon = index;
+    this.network?.send({ type: 'pose', pose: this.pose() });
     this.reloadTimer = 0;
     this.state.reloading = false;
     this.cooldown = 0.25;
@@ -768,6 +776,7 @@ export class BattleGame {
       this.reserveAmmo[i] <= 0
     )
       return;
+    this.network?.send({ type: 'reload' });
     this.reloadTimer = w.reload;
     this.state.reloading = true;
     this.sound(160, 0.12, 0.04, 'triangle');
@@ -782,6 +791,10 @@ export class BattleGame {
         ) < 3.8,
     );
     if (!l) return;
+    if (this.network) {
+      this.network.send({ type: 'pickup', index: this.loot.indexOf(l) });
+      return;
+    }
     if (l.kind < 3) {
       this.reserveAmmo[l.kind] += WEAPONS[l.kind].capacity * 2;
       this.selectWeapon(l.kind);
@@ -832,6 +845,7 @@ export class BattleGame {
   shoot() {
     const i = this.state.weapon,
       w = WEAPONS[i];
+    if (this.network && this.networkRoom?.phase !== 'playing') return;
     if (this.cooldown > 0 || this.reloadTimer > 0) return;
     if (this.weaponAmmo[i] === 0) {
       this.reload();
@@ -843,6 +857,12 @@ export class BattleGame {
     this.flash.visible = true;
     this.sound(i === 1 ? 90 : 170, 0.1, 0.055);
     this.scene.updateMatrixWorld(true);
+    if (this.network)
+      this.network.send({
+        type: 'shoot',
+        pose: this.pose(),
+        aiming: this.aiming,
+      });
     let hit = false;
     for (let p = 0; p < w.pellets; p++) {
       const spread = w.spread * (this.aiming ? 0.3 : 1);
@@ -859,7 +879,7 @@ export class BattleGame {
         true,
       );
       const first = hits[0];
-      if (first && first.object.userData.bot !== undefined) {
+      if (!this.network && first && first.object.userData.bot !== undefined) {
         const b = this.bots[first.object.userData.bot];
         if (b.hp > 0) {
           const headshot = first.point.y - b.mesh.position.y > 1.72;
@@ -908,7 +928,7 @@ export class BattleGame {
     if (this.state.health <= 0) this.finish(false);
   }
   finish(won: boolean) {
-    this.state.rank = won ? 1 : this.state.alive;
+    if (!this.network) this.state.rank = won ? 1 : this.state.alive;
     this.state.phase = won ? 'won' : 'lost';
     this.shooting = false;
     this.keys.clear();
@@ -1029,8 +1049,8 @@ export class BattleGame {
       this.camera.position.set(83 + Math.sin(t) * 8, 55, 93 + Math.cos(t) * 8);
       this.camera.lookAt(0, 2, -8);
     } else if (this.state.phase === 'playing') {
-      this.state.elapsed += dt;
-      this.state.storm = stormRadius(this.state.elapsed);
+      if (!this.network) this.state.elapsed += dt;
+      if (!this.network) this.state.storm = stormRadius(this.state.elapsed);
       this.storm.scale.set(this.state.storm, 1, this.state.storm);
       this.cooldown = Math.max(0, this.cooldown - dt);
       this.recoil = Math.max(0, this.recoil - dt * 0.65);
@@ -1045,8 +1065,10 @@ export class BattleGame {
             this.reserveAmmo[i],
             WEAPONS[i].capacity,
           );
-          this.weaponAmmo[i] = reloaded.ammo;
-          this.reserveAmmo[i] = reloaded.reserve;
+          if (!this.network) {
+            this.weaponAmmo[i] = reloaded.ammo;
+            this.reserveAmmo[i] = reloaded.reserve;
+          }
           this.state.reloading = false;
         }
       }
@@ -1064,7 +1086,13 @@ export class BattleGame {
         mz /= length;
       }
       const speed =
-        (this.keys.has('ShiftLeft') ? 11 : 7) * (this.aiming ? 0.6 : 1) * dt;
+        (this.network && this.networkRoom?.phase !== 'playing'
+          ? 0
+          : this.keys.has('ShiftLeft')
+            ? 11
+            : 7) *
+        (this.aiming ? 0.6 : 1) *
+        dt;
       this.move(
         this.position,
         (mx * Math.cos(this.yaw) - mz * Math.sin(this.yaw)) * speed,
@@ -1072,6 +1100,8 @@ export class BattleGame {
       );
       if (this.keys.has('ArrowLeft')) this.yaw += dt * 1.5;
       if (this.keys.has('ArrowRight')) this.yaw -= dt * 1.5;
+      if (this.network && this.networkRoom?.phase === 'countdown')
+        this.velocityY = 0;
       this.velocityY -= 20 * dt;
       this.position.y = Math.max(1.7, this.position.y + this.velocityY * dt);
       if (this.position.y === 1.7) this.velocityY = 0;
@@ -1098,10 +1128,14 @@ export class BattleGame {
       if (this.shooting) this.shoot();
       this.state.outside =
         Math.hypot(this.position.x, this.position.z) > this.state.storm;
-      if (this.state.outside)
+      if (this.state.outside && !this.network)
         this.damage(dt * (this.state.elapsed > 180 ? 11 : 5));
-      if (this.state.phase === 'playing') this.updateBots(dt);
-      if (this.state.phase === 'playing' && this.state.alive <= 1)
+      if (this.state.phase === 'playing' && !this.network) this.updateBots(dt);
+      if (
+        this.state.phase === 'playing' &&
+        this.state.alive <= 1 &&
+        !this.network
+      )
         this.finish(true);
       const near = this.loot.find(
         (l) =>
@@ -1120,6 +1154,25 @@ export class BattleGame {
         : '';
       this.noticeTimer -= dt;
       if (this.noticeTimer <= 0) this.state.notice = '';
+    }
+    if (this.network) {
+      this.bots.forEach((b, i) => {
+        const target = this.remoteTargets[i];
+        if (target) {
+          b.mesh.position.lerp(target, Math.min(1, dt * 15));
+          b.mesh.children[4].rotation.x = Math.sin(this.time * 9) * 0.2;
+          b.mesh.children[6].rotation.x = -Math.sin(this.time * 9) * 0.2;
+        }
+      });
+      this.networkTime += dt;
+      if (this.networkTime > 0.05) {
+        this.networkTime = 0;
+        if (
+          this.state.phase === 'playing' &&
+          this.networkRoom?.phase === 'playing'
+        )
+          this.network.send({ type: 'pose', pose: this.pose() });
+      }
     }
     for (const l of this.loot)
       if (!l.used) {
@@ -1154,6 +1207,142 @@ export class BattleGame {
       .filter((b) => b.hp > 0)
       .map((b) => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
     this.onState({ ...this.state });
+  }
+  pose(): PlayerPose {
+    return {
+      x: this.position.x,
+      y: this.position.y,
+      z: this.position.z,
+      yaw: this.yaw,
+      pitch: this.pitch,
+      weapon: this.state.weapon,
+    };
+  }
+  attachNetwork(playerId: string, send: (command: Command) => void) {
+    this.network = { playerId, send };
+    this.networkRound = 0;
+    this.networkRoom = null;
+    this.networkEvents.clear();
+  }
+  detachNetwork() {
+    this.network = null;
+    this.networkRoom = null;
+    this.networkRound = 0;
+    this.remoteTargets = [];
+    this.lobby();
+    this.resetBots();
+  }
+  applyNetworkSnapshot(room: RoomSnapshot, acknowledgedPose?: PlayerPose) {
+    if (!this.network) return;
+    this.networkRoom = room;
+    const me = room.players.find((p) => p.id === this.network?.playerId);
+    if (!me) return;
+    if (room.phase === 'waiting') {
+      if (this.state.phase !== 'lobby') this.lobby();
+      return;
+    }
+    const remotes = room.players.filter((p) => p.id !== me.id);
+    const newRound = room.round !== this.networkRound;
+    if (newRound) {
+      this.networkRound = room.round;
+      this.networkEvents.clear();
+      this.state.phase = 'paused';
+      this.state.weapon = 0;
+      this.state.hit = 0;
+      this.state.hurt = 0;
+      this.state.pickup = '';
+      this.state.notice = 'Click Enter match when you are ready.';
+      this.position.set(me.x, me.y, me.z);
+      this.yaw = me.yaw;
+      this.pitch = 0;
+      this.velocityY = 0;
+      this.reloadTimer = 0;
+      this.cooldown = 0.3;
+      this.resetBots(remotes.length);
+      this.spawnLoot();
+      this.gun.visible = true;
+      this.storm.visible = true;
+      this.camera.position.copy(this.position);
+      this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+    }
+    if (this.bots.length !== remotes.length) this.resetBots(remotes.length);
+    this.remoteTargets = remotes.map((p, i) => {
+      const b = this.bots[i];
+      b.name = p.name;
+      b.hp = p.health;
+      b.mesh.visible = p.health > 0;
+      b.mesh.rotation.y = p.yaw + Math.PI;
+      return new THREE.Vector3(p.x, p.y - 1.7, p.z);
+    });
+    if (!newRound && acknowledgedPose) {
+      const correctionX = me.x - acknowledgedPose.x,
+        correctionZ = me.z - acknowledgedPose.z;
+      if (Math.hypot(correctionX, correctionZ) > 0.05) {
+        this.position.x += correctionX;
+        this.position.z += correctionZ;
+      }
+    }
+    if (me.health < this.state.health || me.shield < this.state.shield)
+      this.state.hurt = 0.3;
+    this.state.health = me.health;
+    this.state.shield = me.shield;
+    this.state.kills = me.kills;
+    this.state.alive = room.players.filter((p) => p.health > 0).length;
+    this.state.rank = me.rank || this.state.alive;
+    this.state.elapsed = Math.max(0, (room.now - room.startAt) / 1000);
+    this.state.storm = room.storm;
+    this.state.outside = Math.hypot(me.x, me.z) > room.storm;
+    this.storm.scale.set(room.storm, 1, room.storm);
+    this.weaponAmmo = [...me.ammo];
+    this.reserveAmmo = [...me.reserve];
+    this.state.reloading = me.reloadUntil > room.now;
+    room.loot.forEach((used, i) => {
+      if (this.loot[i]) {
+        this.loot[i].used = used;
+        this.loot[i].mesh.visible = !used;
+      }
+    });
+    for (const e of room.events) {
+      if (this.networkEvents.has(e.id)) continue;
+      this.networkEvents.add(e.id);
+      if (e.type === 'shot' && e.player !== me.id && e.end) {
+        const p = room.players.find((p) => p.id === e.player);
+        if (p)
+          this.tracer(
+            new THREE.Vector3(p.x, p.y, p.z),
+            new THREE.Vector3(...e.end),
+            '#ffce8f',
+          );
+      }
+      if (e.type === 'hit' && e.player === me.id) {
+        this.state.hit = 0.18;
+        this.sound(900, 0.06, 0.035, 'sine');
+      }
+      if (e.type === 'elimination') {
+        const winner =
+            room.players.find((p) => p.id === e.player)?.name ?? 'Player',
+          loser = room.players.find((p) => p.id === e.target)?.name ?? 'Player';
+        this.notice(
+          e.player === me.id
+            ? `Eliminated ${loser}`
+            : `${winner} eliminated ${loser}`,
+        );
+      }
+      if (e.type === 'pickup' && e.player === me.id) {
+        this.notice('Supplies collected');
+        this.sound(620, 0.16, 0.07, 'sine');
+      }
+    }
+    if (this.networkEvents.size > 300)
+      this.networkEvents = new Set(room.events.map((e) => e.id));
+    if (me.health <= 0 && this.state.phase !== 'lost') this.finish(false);
+    if (
+      room.phase === 'finished' &&
+      room.winner === me.id &&
+      this.state.phase !== 'won'
+    )
+      this.finish(true);
+    this.emit();
   }
   disposeObject(object: THREE.Object3D) {
     object.traverse((o) => {
