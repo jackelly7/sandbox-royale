@@ -1,0 +1,1183 @@
+import * as THREE from 'three';
+import {
+  BOT_COUNT,
+  WEAPONS,
+  stormRadius,
+  takeDamage,
+  reloadAmmo,
+} from './rules.ts';
+
+export type GameState = {
+  phase: 'lobby' | 'playing' | 'paused' | 'won' | 'lost';
+  health: number;
+  shield: number;
+  alive: number;
+  kills: number;
+  ammo: number;
+  reserve: number;
+  weapon: number;
+  elapsed: number;
+  storm: number;
+  outside: boolean;
+  reloading: boolean;
+  pickup: string;
+  notice: string;
+  hit: number;
+  hurt: number;
+  heading: number;
+  x: number;
+  z: number;
+  rank: number;
+  bots: { x: number; z: number }[];
+};
+type Bot = {
+  mesh: THREE.Group;
+  hp: number;
+  cooldown: number;
+  turn: number;
+  seed: number;
+  name: string;
+};
+type Loot = { mesh: THREE.Group; kind: number; used: boolean };
+export const landmarks = [
+  { x: 18, z: -23, w: 14, d: 12, name: 'SUNSET STATION' },
+  { x: -22, z: -16, w: 14, d: 12, name: 'OLD TOWN' },
+  { x: 30, z: 20, w: 12, d: 10, name: 'THE OUTPOST' },
+  { x: -35, z: 28, w: 12, d: 10, name: 'PALM GROVE' },
+  { x: 2, z: -57, w: 12, d: 9, name: 'NORTH PIER' },
+];
+const names = [
+  'Kestrel',
+  'Ghostwave',
+  'Mako',
+  'Sidewinder',
+  'Copper',
+  'Rook',
+  'Solstice',
+  'Drift',
+  'Bishop',
+  'Cinder',
+  'Juno',
+  'Echo',
+  'Talon',
+  'Vex',
+  'Nomad',
+];
+export class BattleGame {
+  state: GameState = {
+    phase: 'lobby',
+    health: 100,
+    shield: 50,
+    alive: 16,
+    kills: 0,
+    ammo: 30,
+    reserve: 120,
+    weapon: 0,
+    elapsed: 0,
+    storm: 107,
+    outside: false,
+    reloading: false,
+    pickup: '',
+    notice: '',
+    hit: 0,
+    hurt: 0,
+    heading: 0,
+    x: 0,
+    z: 0,
+    rank: 16,
+    bots: [],
+  };
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(62, 1, 0.08, 850);
+  renderer: THREE.WebGLRenderer;
+  world = new THREE.Group();
+  gun = new THREE.Group();
+  bots: Bot[] = [];
+  loot: Loot[] = [];
+  colliders: THREE.Box3[] = [];
+  solids: THREE.Object3D[] = [];
+  storm!: THREE.Mesh;
+  flash!: THREE.Mesh;
+  keys = new Set<string>();
+  ray = new THREE.Raycaster();
+  position = new THREE.Vector3(0, 1.7, 50);
+  yaw = 0;
+  pitch = 0;
+  velocityY = 0;
+  weaponAmmo = [30, 6, 5];
+  reserveAmmo = [120, 30, 20];
+  shooting = false;
+  aiming = false;
+  cooldown = 0;
+  reloadTimer = 0;
+  sensitivity = 1;
+  muted = false;
+  touch = false;
+  touchMove = { x: 0, y: 0 };
+  time = 0;
+  previous = 0;
+  frame = 0;
+  uiTime = 0;
+  noticeTimer = 0;
+  recoil = 0;
+  aiTimer = 0;
+  audio: AudioContext | null = null;
+  observer: ResizeObserver;
+  cleanup: (() => void)[] = [];
+  tracers: { mesh: THREE.Line; life: number }[] = [];
+  destroyed = false;
+  onState: (state: GameState) => void;
+  container: HTMLElement;
+  constructor(container: HTMLElement, onState: (state: GameState) => void) {
+    this.container = container;
+    this.onState = onState;
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      powerPreference: 'high-performance',
+    });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.3;
+    container.appendChild(this.renderer.domElement);
+    this.scene.background = new THREE.Color('#9bc9d2');
+    this.scene.fog = new THREE.Fog('#9bc9d2', 115, 340);
+    this.scene.add(this.world);
+    this.scene.add(this.camera);
+    this.scene.add(new THREE.HemisphereLight('#d6f8ff', '#869852', 2.5));
+    const sun = new THREE.DirectionalLight('#fff1cf', 3.5);
+    sun.position.set(-50, 100, 40);
+    sun.castShadow = true;
+    Object.assign(sun.shadow.camera, {
+      left: -115,
+      right: 115,
+      top: 115,
+      bottom: -115,
+      near: 1,
+      far: 300,
+    });
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.bias = -0.0008;
+    this.scene.add(sun);
+    this.buildWorld();
+    this.buildGun();
+    this.resetBots();
+    this.bind();
+    this.observer = new ResizeObserver(() => this.resize());
+    this.observer.observe(container);
+    this.resize();
+    this.frame = requestAnimationFrame(this.tick);
+  }
+  material(
+    color: string | number,
+    extra: THREE.MeshStandardMaterialParameters = {},
+  ) {
+    return new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...extra });
+  }
+  box(
+    w: number,
+    h: number,
+    d: number,
+    color: string | number,
+    x: number,
+    y: number,
+    z: number,
+    parent: THREE.Object3D = this.world,
+  ) {
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(w, h, d),
+      this.material(color),
+    );
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    parent.add(m);
+    return m;
+  }
+  solid(mesh: THREE.Object3D) {
+    mesh.updateMatrixWorld(true);
+    this.colliders.push(new THREE.Box3().setFromObject(mesh));
+    this.solids.push(mesh);
+  }
+  buildWorld() {
+    const sea = new THREE.Mesh(
+      new THREE.PlaneGeometry(1600, 1600),
+      this.material('#48a7b4', { roughness: 0.3, metalness: 0.15 }),
+    );
+    sea.rotation.x = -Math.PI / 2;
+    sea.position.y = -3.2;
+    this.world.add(sea);
+    const beach = new THREE.Mesh(
+      new THREE.CylinderGeometry(115, 120, 3, 64),
+      this.material('#dfca8d'),
+    );
+    beach.position.y = -2;
+    beach.receiveShadow = true;
+    this.world.add(beach);
+    const island = new THREE.Mesh(
+      new THREE.CylinderGeometry(107, 113, 5, 64),
+      this.material('#88ab62'),
+    );
+    island.position.y = -2.5;
+    island.receiveShadow = true;
+    this.world.add(island);
+    // Sand paths join the settlements and remain open for movement.
+    this.box(9, 0.05, 184, '#c7bc8a', 0, 0.035, 0);
+    this.box(162, 0.055, 8, '#c7bc8a', 0, 0.04, 4);
+    this.box(6, 0.06, 86, '#c7bc8a', 40, 0.05, -12);
+    const building = (
+      x: number,
+      z: number,
+      w: number,
+      d: number,
+      h: number,
+      color: string,
+    ) => {
+      const base = this.box(w, h, d, color, x, h / 2, z);
+      this.solid(base);
+      this.box(w + 0.8, 0.45, d + 0.8, '#f2e0b6', x, h, z);
+      this.box(w + 0.4, 0.28, d + 0.4, '#547c75', x, h + 0.35, z);
+      for (let n = -1; n <= 1; n++) {
+        this.box(
+          1.5,
+          1.7,
+          0.08,
+          '#294b58',
+          x + n * w * 0.26,
+          h * 0.59,
+          z + d / 2 + 0.05,
+        );
+        this.box(
+          1.7,
+          0.16,
+          0.3,
+          '#e7d7b6',
+          x + n * w * 0.26,
+          h * 0.59 - 0.88,
+          z + d / 2 + 0.1,
+        );
+      }
+      this.box(1.75, 2.8, 0.12, '#365a60', x, h / 2 - 1.4, z + d / 2 + 0.12);
+      const awning = this.box(
+        w * 0.8,
+        0.2,
+        2.5,
+        '#d98e60',
+        x,
+        3.3,
+        z + d / 2 + 1.1,
+      );
+      awning.rotation.x = 0.1;
+      for (const s of [-1, 1])
+        this.box(
+          0.14,
+          3.3,
+          0.14,
+          '#e5d9bb',
+          x + s * w * 0.36,
+          1.65,
+          z + d / 2 + 2.1,
+        );
+      this.box(2.2, 1, 2, '#e2dfc0', x + w * 0.2, h + 0.8, z - 1);
+    };
+    building(18, -23, 14, 12, 7.5, '#c77b56');
+    building(-22, -16, 14, 12, 6, '#e2c884');
+    building(30, 20, 12, 10, 5.7, '#70a6a0');
+    building(-35, 28, 12, 10, 6.6, '#dda274');
+    building(2, -57, 12, 9, 5, '#729d9d');
+    building(-47, -28, 9, 11, 4.5, '#b9bd88');
+    building(48, -40, 11, 12, 7.2, '#e1b47c');
+    building(-18, 49, 10, 8, 4.5, '#c3c7a0');
+    building(49, 45, 9, 10, 4.5, '#b8795d');
+    building(-56, 7, 11, 9, 5.4, '#669f9b');
+    // A stepped clock tower gives the island its silhouette.
+    const tower = this.box(7, 17, 7, '#ebc993', 18, 8.5, -23);
+    this.solid(tower);
+    this.box(8.2, 0.7, 8.2, '#f5e7c0', 18, 16.8, -23);
+    this.box(6, 4, 6, '#d5a271', 18, 19, -23);
+    const roof = new THREE.Mesh(
+      new THREE.ConeGeometry(5.3, 3, 4),
+      this.material('#497b78'),
+    );
+    roof.position.set(18, 22.2, -23);
+    roof.rotation.y = Math.PI / 4;
+    roof.castShadow = true;
+    this.world.add(roof);
+    const clock = new THREE.Mesh(
+      new THREE.CircleGeometry(1.3, 24),
+      this.material('#f9edcd'),
+    );
+    clock.position.set(18, 18.9, -19.98);
+    this.world.add(clock);
+    this.box(0.12, 0.9, 0.08, '#3b5b60', 18, 19.2, -19.9);
+    this.box(0.75, 0.12, 0.08, '#3b5b60', 18.3, 18.9, -19.9);
+    this.box(0.15, 5, 0.15, '#d7d6b7', 18, 25, -23);
+    const flag = this.box(2.5, 1.25, 0.07, '#ed744e', 19.2, 26.7, -23);
+    flag.rotation.y = 0.15;
+    // Utility poles and bunting through the central street.
+    for (let i = 0; i < 4; i++) {
+      const z = -36 + i * 21;
+      this.box(0.3, 9, 0.3, '#626d56', -6, 4.5, z);
+      this.box(2.3, 0.2, 0.2, '#626d56', -6, 8.4, z);
+      if (i < 3) {
+        const wire = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-6, 8.5, z),
+            new THREE.Vector3(-6, 7.5, z + 10.5),
+            new THREE.Vector3(-6, 8.5, z + 21),
+          ]),
+          new THREE.LineBasicMaterial({ color: '#4f6a60' }),
+        );
+        this.world.add(wire);
+      }
+    }
+    const rand = this.random(82);
+    for (let i = 0; i < 125; i++) {
+      const x = (rand() - 0.5) * 204,
+        z = (rand() - 0.5) * 204;
+      if (
+        Math.hypot(x, z) > 101 ||
+        Math.abs(x) < 9 ||
+        Math.abs(z - 4) < 8 ||
+        this.colliders.some((b) =>
+          b
+            .clone()
+            .expandByScalar(5)
+            .containsPoint(new THREE.Vector3(x, 2, z)),
+        )
+      )
+        continue;
+      if (i % 4 === 0) this.palm(x, z, 4 + rand() * 3);
+      else this.tree(x, z, 4 + rand() * 4, rand);
+    }
+    for (let i = 0; i < 40; i++) {
+      const a = rand() * Math.PI * 2,
+        r = 83 + rand() * 22;
+      const x = Math.cos(a) * r,
+        z = Math.sin(a) * r;
+      const rock = new THREE.Mesh(
+        new THREE.DodecahedronGeometry(2 + rand() * 3, 0),
+        this.material(i % 2 ? '#9caa8c' : '#c7c4a3'),
+      );
+      rock.position.set(x, 0.4, z);
+      rock.scale.y = 0.65;
+      rock.rotation.set(rand(), rand(), rand());
+      rock.castShadow = true;
+      rock.receiveShadow = true;
+      this.world.add(rock);
+      this.solid(rock);
+    }
+    for (const [x, z] of [
+      [9, 15],
+      [-9, -3],
+      [34, -9],
+      [-18, 30],
+      [9, -42],
+      [55, 15],
+      [-48, 43],
+      [-32, -44],
+    ]) {
+      const c = this.box(2.4, 2.4, 2.4, '#99764e', x, 1.2, z);
+      this.solid(c);
+      this.box(2.5, 0.2, 2.5, '#d0a671', x, 0.3, z);
+      this.box(2.5, 0.2, 2.5, '#d0a671', x, 2.1, z);
+    }
+    // Outlying islets and clouds create depth without extra game space.
+    for (let i = 0; i < 12; i++) {
+      const a = i * 0.58,
+        r = 230 + rand() * 70;
+      const m = new THREE.Mesh(
+        new THREE.ConeGeometry(22 + rand() * 32, 30 + rand() * 35, 5),
+        this.material('#739f96'),
+      );
+      m.position.set(Math.cos(a) * r, -2, Math.sin(a) * r);
+      this.world.add(m);
+    }
+    for (let i = 0; i < 18; i++) {
+      const g = new THREE.Group();
+      for (let j = 0; j < 4; j++) {
+        const c = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(7 + rand() * 4, 1),
+          this.material('#f4eee0', { flatShading: true }),
+        );
+        c.scale.set(1.7, 0.45, 1);
+        c.position.set(j * 8, rand() * 3, rand() * 4);
+        g.add(c);
+      }
+      g.position.set(
+        (rand() - 0.5) * 600,
+        70 + rand() * 30,
+        (rand() - 0.5) * 600,
+      );
+      this.world.add(g);
+    }
+    this.storm = new THREE.Mesh(
+      new THREE.CylinderGeometry(1, 1, 65, 96, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: '#b291f4',
+        transparent: true,
+        opacity: 0.18,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    this.storm.position.y = 24;
+    this.storm.scale.set(107, 1, 107);
+    this.storm.visible = false;
+    this.scene.add(this.storm);
+    this.spawnLoot();
+  }
+  random(seed: number) {
+    return () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 4294967296;
+    };
+  }
+  tree(x: number, z: number, h: number, rand: () => number) {
+    const trunk = this.box(0.55, h * 0.55, 0.55, '#776e49', x, h * 0.27, z);
+    for (let j = 0; j < 2; j++) {
+      const leaf = new THREE.Mesh(
+        new THREE.ConeGeometry(h * 0.43 - j * 0.5, h * 0.68, 6),
+        this.material(j ? '#518e65' : '#448263'),
+      );
+      leaf.position.set(x, h * 0.65 + j * h * 0.27, z);
+      leaf.rotation.y = rand();
+      leaf.castShadow = true;
+      this.world.add(leaf);
+    }
+    this.solid(trunk);
+  }
+  palm(x: number, z: number, h: number) {
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.2, 0.4, h, 6),
+      this.material('#b19864'),
+    );
+    trunk.position.set(x, h / 2, z);
+    trunk.rotation.z = 0.12;
+    trunk.castShadow = true;
+    this.world.add(trunk);
+    for (let j = 0; j < 6; j++) {
+      const leaf = new THREE.Mesh(
+        new THREE.ConeGeometry(0.75, h * 0.75, 3),
+        this.material(j % 2 ? '#5caa73' : '#3d966d'),
+      );
+      leaf.position.set(
+        x + Math.cos((j * Math.PI) / 3) * 1.7,
+        h - 0.3,
+        z + Math.sin((j * Math.PI) / 3) * 1.7,
+      );
+      leaf.rotation.set(
+        Math.cos((j * Math.PI) / 3) * 0.9,
+        (j * Math.PI) / 3,
+        Math.sin((j * Math.PI) / 3) * 0.9,
+      );
+      leaf.castShadow = true;
+      this.world.add(leaf);
+    }
+  }
+  spawnLoot() {
+    for (const l of this.loot) {
+      this.world.remove(l.mesh);
+      this.disposeObject(l.mesh);
+    }
+    this.loot = [];
+    const points = [
+      [3, 39],
+      [-5, 19],
+      [10, -6],
+      [-12, -31],
+      [34, 8],
+      [-29, 15],
+      [26, -41],
+      [-5, -50],
+      [45, 30],
+      [-46, -12],
+      [-10, 61],
+      [59, -17],
+      [-28, -57],
+      [5, 4],
+      [65, 48],
+      [-57, 46],
+      [5, 72],
+      [70, -48],
+      [-60, -57],
+    ];
+    points.forEach(([x, z], i) => {
+      const kind = i % 5;
+      const colors = ['#85e2bc', '#9cb8ff', '#cf9cf4', '#78dfee', '#ffc377'];
+      const group = new THREE.Group();
+      const box = this.box(1.2, 0.75, 0.85, colors[kind], 0, 0.65, 0, group);
+      (box.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(
+        colors[kind],
+      );
+      (box.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.15;
+      this.box(1.23, 0.15, 0.88, '#f6f4d9', 0, 0.66, 0, group);
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.11, 0.5, 5, 6, 1, true),
+        new THREE.MeshBasicMaterial({
+          color: colors[kind],
+          transparent: true,
+          opacity: 0.15,
+          depthWrite: false,
+        }),
+      );
+      beam.position.y = 2.5;
+      group.add(beam);
+      group.position.copy(this.safePosition(x, z));
+      this.world.add(group);
+      this.loot.push({ mesh: group, kind, used: false });
+    });
+  }
+  buildGun() {
+    this.camera.add(this.gun);
+    this.box(0.15, 0.16, 0.64, '#2d4147', 0, 0, 0, this.gun);
+    this.box(0.19, 0.08, 0.34, '#62847c', 0, 0.105, -0.04, this.gun);
+    this.box(0.07, 0.07, 0.48, '#25373c', 0, 0.025, -0.5, this.gun);
+    this.box(0.11, 0.24, 0.12, '#202f36', 0, -0.14, 0.06, this.gun).rotation.x =
+      -0.2;
+    this.box(0.14, 0.21, 0.16, '#769081', 0, -0.1, -0.2, this.gun).rotation.x =
+      0.25;
+    this.box(0.055, 0.06, 0.04, '#141f28', 0, 0.16, -0.25, this.gun);
+    this.box(0.2, 0.16, 0.24, '#d3a579', 0.08, -0.13, 0.25, this.gun);
+    this.box(0.18, 0.15, 0.28, '#356b68', 0.09, -0.15, 0.44, this.gun);
+    this.box(0.17, 0.15, 0.24, '#d3a579', -0.035, -0.12, -0.25, this.gun);
+    this.box(
+      0.15,
+      0.15,
+      0.29,
+      '#356b68',
+      -0.13,
+      -0.2,
+      -0.14,
+      this.gun,
+    ).rotation.z = -0.5;
+    this.flash = new THREE.Mesh(
+      new THREE.ConeGeometry(0.08, 0.28, 5),
+      new THREE.MeshBasicMaterial({ color: '#ffe69c' }),
+    );
+    this.flash.rotation.x = -Math.PI / 2;
+    this.flash.position.set(0, 0.025, -0.85);
+    this.flash.visible = false;
+    this.gun.add(this.flash);
+    this.gun.visible = false;
+  }
+  resetBots() {
+    for (const b of this.bots) {
+      this.world.remove(b.mesh);
+      this.disposeObject(b.mesh);
+    }
+    this.bots = [];
+    for (let i = 0; i < BOT_COUNT; i++) {
+      const g = new THREE.Group(),
+        color = ['#d77a5c', '#638bad', '#bcaa74', '#925f83'][i % 4];
+      this.box(0.72, 0.88, 0.4, color, 0, 1.25, 0, g);
+      this.box(0.5, 0.5, 0.5, '#d8ad83', 0, 1.96, 0, g);
+      this.box(0.54, 0.16, 0.53, '#344a4d', 0, 2.2, 0, g);
+      this.box(0.44, 0.15, 0.03, '#253e43', 0, 1.98, 0.26, g);
+      for (const s of [-1, 1]) {
+        this.box(0.24, 0.77, 0.26, '#3c5556', s * 0.22, 0.4, 0, g);
+        this.box(0.24, 0.65, 0.26, color, s * 0.49, 1.29, 0.1, g);
+      }
+      this.box(0.15, 0.17, 0.8, '#273f43', 0.32, 1.32, 0.43, g);
+      const a = (i / BOT_COUNT) * Math.PI * 2,
+        r = 48 + (i % 4) * 11;
+      g.position.copy(this.safePosition(Math.sin(a) * r, Math.cos(a) * r));
+      this.world.add(g);
+      g.userData.bot = i;
+      g.traverse((c) => {
+        c.userData.bot = i;
+      });
+      this.bots.push({
+        mesh: g,
+        hp: 100,
+        cooldown: 2 + i * 0.2,
+        turn: 0,
+        seed: i * 0.7,
+        name: names[i],
+      });
+    }
+  }
+  bind() {
+    const on = (target: EventTarget, type: string, fn: EventListener) => {
+      target.addEventListener(type, fn);
+      this.cleanup.push(() => target.removeEventListener(type, fn));
+    };
+    on(document, 'keydown', ((e: KeyboardEvent) => {
+      if (this.state.phase !== 'playing') return;
+      if (
+        [
+          'Space',
+          'Tab',
+          'ArrowUp',
+          'ArrowDown',
+          'ArrowLeft',
+          'ArrowRight',
+        ].includes(e.code)
+      )
+        e.preventDefault();
+      this.keys.add(e.code);
+      if (e.code === 'KeyR') this.reload();
+      if (e.code === 'KeyE') this.pickup();
+      if (['Digit1', 'Digit2', 'Digit3'].includes(e.code))
+        this.selectWeapon(Number(e.code.slice(-1)) - 1);
+      if (e.code === 'Space' && this.position.y <= 1.71) this.velocityY = 7;
+      if (e.code === 'Escape') this.pause();
+    }) as EventListener);
+    on(document, 'keyup', ((e: KeyboardEvent) => {
+      this.keys.delete(e.code);
+    }) as EventListener);
+    on(document, 'mousemove', ((e: MouseEvent) => {
+      if (
+        document.pointerLockElement === this.renderer.domElement &&
+        this.state.phase === 'playing'
+      )
+        this.look(e.movementX, e.movementY);
+    }) as EventListener);
+    on(this.renderer.domElement, 'mousedown', ((e: MouseEvent) => {
+      if (this.state.phase === 'playing') {
+        if (e.button === 0) this.shooting = true;
+        if (e.button === 2) this.aiming = true;
+      }
+    }) as EventListener);
+    on(document, 'mouseup', (() => {
+      this.shooting = false;
+      this.aiming = false;
+    }) as EventListener);
+    on(this.renderer.domElement, 'contextmenu', (e: Event) =>
+      e.preventDefault(),
+    );
+    on(document, 'pointerlockchange', (() => {
+      if (
+        !document.pointerLockElement &&
+        this.state.phase === 'playing' &&
+        !this.touch
+      )
+        this.pause();
+    }) as EventListener);
+    on(window, 'blur', (() => {
+      if (this.state.phase === 'playing') this.pause();
+    }) as EventListener);
+  }
+  look(x: number, y: number) {
+    this.yaw -= x * 0.002 * this.sensitivity;
+    this.pitch = THREE.MathUtils.clamp(
+      this.pitch - y * 0.002 * this.sensitivity,
+      -1.35,
+      1.35,
+    );
+  }
+  resize() {
+    const { clientWidth: w, clientHeight: h } = this.container;
+    this.renderer.setSize(w, h);
+    this.camera.aspect = w / h;
+    this.camera.updateProjectionMatrix();
+  }
+  async start(touch = false) {
+    if (this.state.phase !== 'paused') {
+      this.state = {
+        ...this.state,
+        health: 100,
+        shield: 50,
+        alive: 16,
+        kills: 0,
+        ammo: 30,
+        reserve: 120,
+        weapon: 0,
+        elapsed: 0,
+        storm: 107,
+        rank: 16,
+        notice: 'Stay inside the storm. Be the last one standing.',
+        hit: 0,
+        hurt: 0,
+        pickup: '',
+        outside: false,
+        reloading: false,
+      };
+      this.position.set(0, 1.7, 50);
+      this.yaw = 0;
+      this.pitch = 0;
+      this.velocityY = 0;
+      this.weaponAmmo = [30, 6, 5];
+      this.reserveAmmo = [120, 30, 20];
+      this.reloadTimer = 0;
+      this.cooldown = 0.3;
+      this.resetBots();
+      this.spawnLoot();
+      this.noticeTimer = 5;
+      this.aiTimer = 0;
+    }
+    this.touch = touch;
+    this.state.phase = 'playing';
+    this.gun.visible = true;
+    this.storm.visible = true;
+    if (!this.audio) {
+      try {
+        this.audio = new AudioContext();
+      } catch {
+        /* Sound is optional. */
+      }
+    }
+    void this.audio?.resume();
+    if (!touch) {
+      try {
+        await this.renderer.domElement.requestPointerLock();
+      } catch {
+        this.state.phase = 'paused';
+        this.state.notice =
+          'Click Resume to capture the mouse, or use touch controls.';
+      }
+    }
+    this.emit();
+  }
+  pause() {
+    if (this.state.phase !== 'playing') return;
+    this.state.phase = 'paused';
+    this.keys.clear();
+    this.shooting = false;
+    this.aiming = false;
+    this.touchMove = { x: 0, y: 0 };
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.emit();
+  }
+  lobby() {
+    this.state.phase = 'lobby';
+    this.keys.clear();
+    this.shooting = false;
+    this.aiming = false;
+    this.gun.visible = false;
+    this.storm.visible = false;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.emit();
+  }
+  selectWeapon(index: number) {
+    if (index < 0 || index > 2) return;
+    this.state.weapon = index;
+    this.reloadTimer = 0;
+    this.state.reloading = false;
+    this.cooldown = 0.25;
+    this.emit();
+  }
+  reload() {
+    const i = this.state.weapon,
+      w = WEAPONS[i];
+    if (
+      this.reloadTimer > 0 ||
+      this.weaponAmmo[i] >= w.capacity ||
+      this.reserveAmmo[i] <= 0
+    )
+      return;
+    this.reloadTimer = w.reload;
+    this.state.reloading = true;
+    this.sound(160, 0.12, 0.04, 'triangle');
+    this.emit();
+  }
+  pickup() {
+    const l = this.loot.find(
+      (l) =>
+        !l.used &&
+        l.mesh.position.distanceTo(
+          new THREE.Vector3(this.position.x, 0, this.position.z),
+        ) < 3.8,
+    );
+    if (!l) return;
+    if (l.kind < 3) {
+      this.reserveAmmo[l.kind] += WEAPONS[l.kind].capacity * 2;
+      this.selectWeapon(l.kind);
+      this.notice(`${WEAPONS[l.kind].name} ammunition collected`);
+    }
+    if (l.kind === 3) {
+      this.state.shield = Math.min(100, this.state.shield + 50);
+      this.notice('+50 shield');
+    }
+    if (l.kind === 4) {
+      this.state.health = Math.min(100, this.state.health + 45);
+      this.notice('+45 health');
+    }
+    l.used = true;
+    l.mesh.visible = false;
+    this.sound(620, 0.16, 0.07, 'sine');
+    this.emit();
+  }
+  notice(text: string) {
+    this.state.notice = text;
+    this.noticeTimer = 3;
+  }
+  sound(
+    freq: number,
+    duration: number,
+    volume: number,
+    type: OscillatorType = 'sawtooth',
+  ) {
+    if (this.muted || !this.audio) return;
+    const osc = this.audio.createOscillator(),
+      gain = this.audio.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, this.audio.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(
+      Math.max(20, freq * 0.2),
+      this.audio.currentTime + duration,
+    );
+    gain.gain.setValueAtTime(volume, this.audio.currentTime);
+    gain.gain.exponentialRampToValueAtTime(
+      0.001,
+      this.audio.currentTime + duration,
+    );
+    osc.connect(gain);
+    gain.connect(this.audio.destination);
+    osc.start();
+    osc.stop(this.audio.currentTime + duration);
+  }
+  shoot() {
+    const i = this.state.weapon,
+      w = WEAPONS[i];
+    if (this.cooldown > 0 || this.reloadTimer > 0) return;
+    if (this.weaponAmmo[i] === 0) {
+      this.reload();
+      return;
+    }
+    this.weaponAmmo[i]--;
+    this.cooldown = w.interval;
+    this.recoil = 0.095;
+    this.flash.visible = true;
+    this.sound(i === 1 ? 90 : 170, 0.1, 0.055);
+    this.scene.updateMatrixWorld(true);
+    let hit = false;
+    for (let p = 0; p < w.pellets; p++) {
+      const spread = w.spread * (this.aiming ? 0.3 : 1);
+      this.ray.setFromCamera(
+        new THREE.Vector2(
+          (Math.random() - 0.5) * spread,
+          (Math.random() - 0.5) * spread,
+        ),
+        this.camera,
+      );
+      const enemies = this.bots.filter((b) => b.hp > 0).map((b) => b.mesh);
+      const hits = this.ray.intersectObjects(
+        [...this.solids, ...enemies],
+        true,
+      );
+      const first = hits[0];
+      if (first && first.object.userData.bot !== undefined) {
+        const b = this.bots[first.object.userData.bot];
+        if (b.hp > 0) {
+          const headshot = first.point.y - b.mesh.position.y > 1.72;
+          b.hp -= w.damage * (headshot ? 1.65 : 1);
+          hit = true;
+          if (b.hp <= 0) this.killBot(b, true);
+        }
+      }
+      const end = first
+        ? first.point
+        : this.ray.ray.at(120, new THREE.Vector3());
+      if (p === 0)
+        this.tracer(
+          this.camera.localToWorld(new THREE.Vector3(0.2, -0.17, -0.7)),
+          end,
+          '#ffe9a8',
+        );
+    }
+    if (hit) {
+      this.state.hit = 0.18;
+      this.sound(900, 0.06, 0.035, 'sine');
+    }
+    this.emit();
+  }
+  tracer(from: THREE.Vector3, to: THREE.Vector3, color: string) {
+    const line = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([from, to]),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 }),
+    );
+    this.scene.add(line);
+    this.tracers.push({ mesh: line, life: 0.08 });
+  }
+  killBot(b: Bot, player = false) {
+    b.hp = 0;
+    b.mesh.visible = false;
+    if (player) {
+      this.state.kills++;
+      this.notice(`Eliminated ${b.name}`);
+    }
+    this.state.alive = this.bots.filter((b) => b.hp > 0).length + 1;
+  }
+  damage(amount: number) {
+    const d = takeDamage(this.state.health, this.state.shield, amount);
+    Object.assign(this.state, d);
+    this.state.hurt = 0.3;
+    if (this.state.health <= 0) this.finish(false);
+  }
+  finish(won: boolean) {
+    this.state.rank = won ? 1 : this.state.alive;
+    this.state.phase = won ? 'won' : 'lost';
+    this.shooting = false;
+    this.keys.clear();
+    this.aiming = false;
+    if (document.pointerLockElement) document.exitPointerLock();
+    this.sound(won ? 780 : 150, 0.5, 0.07, 'triangle');
+    this.emit();
+  }
+  safePosition(x: number, z: number) {
+    if (!this.blocked(x, z)) return new THREE.Vector3(x, 0, z);
+    for (let r = 2; r <= 18; r += 2)
+      for (let i = 0; i < 12; i++) {
+        const a = (i * Math.PI) / 6,
+          nx = x + Math.cos(a) * r,
+          nz = z + Math.sin(a) * r;
+        if (Math.hypot(nx, nz) < 104 && !this.blocked(nx, nz))
+          return new THREE.Vector3(nx, 0, nz);
+      }
+    return new THREE.Vector3(0, 0, 4);
+  }
+  blocked(x: number, z: number) {
+    return this.colliders.some(
+      (b) =>
+        x > b.min.x - 0.48 &&
+        x < b.max.x + 0.48 &&
+        z > b.min.z - 0.48 &&
+        z < b.max.z + 0.48,
+    );
+  }
+  move(pos: THREE.Vector3, dx: number, dz: number) {
+    if (!this.blocked(pos.x + dx, pos.z)) pos.x += dx;
+    if (!this.blocked(pos.x, pos.z + dz)) pos.z += dz;
+    const length = Math.hypot(pos.x, pos.z);
+    if (length > 110) {
+      pos.x *= 110 / length;
+      pos.z *= 110 / length;
+    }
+  }
+  visible(from: THREE.Vector3, to: THREE.Vector3) {
+    const dir = to.clone().sub(from);
+    const distance = dir.length();
+    this.ray.set(from, dir.normalize());
+    const hit = this.ray.intersectObjects(this.solids, false)[0];
+    return !hit || hit.distance > distance;
+  }
+  updateBots(dt: number) {
+    const target = this.position.clone();
+    target.y = 1.3;
+    for (const b of this.bots) {
+      if (b.hp <= 0) continue;
+      const p = b.mesh.position,
+        distance = p.distanceTo(this.position);
+      b.cooldown -= dt;
+      const safe = Math.hypot(p.x, p.z) < this.state.storm - 5;
+      const angle = !safe
+        ? Math.atan2(-p.x, -p.z)
+        : distance < 43
+          ? Math.atan2(this.position.x - p.x, this.position.z - p.z)
+          : b.seed + Math.sin(this.time * 0.13 + b.seed) * 2;
+      const speed = (!safe ? 5.8 : distance < 13 ? 1.7 : 3.2) * dt;
+      const old = p.clone();
+      this.move(p, Math.sin(angle) * speed, Math.cos(angle) * speed);
+      if (p.distanceToSquared(old) < 0.0001) {
+        b.seed += dt * 3;
+        this.move(p, Math.cos(angle) * speed, -Math.sin(angle) * speed);
+      }
+      b.mesh.rotation.y = angle;
+      b.mesh.children[4].rotation.x = Math.sin(this.time * 9 + b.seed) * 0.3;
+      b.mesh.children[6].rotation.x = -Math.sin(this.time * 9 + b.seed) * 0.3;
+      if (!safe) {
+        b.hp -= dt * (this.state.elapsed > 160 ? 5 : 2);
+        if (b.hp <= 0) {
+          this.killBot(b);
+          continue;
+        }
+      }
+      if (distance < 47 && b.cooldown <= 0 && this.state.phase === 'playing') {
+        const from = p.clone().add(new THREE.Vector3(0, 1.45, 0));
+        if (this.visible(from, target)) {
+          this.tracer(from, target, '#ff9c73');
+          if (Math.random() < (distance < 18 ? 0.68 : 0.38))
+            this.damage(5 + Math.random() * 4);
+        }
+        b.cooldown = 1.1 + Math.random() * 1.4;
+      }
+    }
+    this.aiTimer += dt;
+    if (this.aiTimer > 1.5) {
+      this.aiTimer = 0;
+      const alive = this.bots.filter((b) => b.hp > 0);
+      for (const b of alive) {
+        const enemy = alive.find(
+          (o) =>
+            o !== b &&
+            o.hp > 0 &&
+            o.mesh.position.distanceTo(b.mesh.position) < 34,
+        );
+        if (!enemy) continue;
+        const from = b.mesh.position.clone().add(new THREE.Vector3(0, 1.4, 0)),
+          to = enemy.mesh.position.clone().add(new THREE.Vector3(0, 1.4, 0));
+        if (this.visible(from, to)) {
+          this.tracer(from, to, '#ffe9a8');
+          enemy.hp -= 9 + Math.random() * 12;
+          if (enemy.hp <= 0) this.killBot(enemy);
+        }
+      }
+    }
+  }
+  tick = (now: number) => {
+    if (this.destroyed) return;
+    const dt = Math.min((now - this.previous) / 1000 || 0, 0.04);
+    this.previous = now;
+    this.time += dt;
+    if (this.state.phase === 'lobby') {
+      const t = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 0
+        : this.time * 0.025;
+      this.camera.position.set(83 + Math.sin(t) * 8, 55, 93 + Math.cos(t) * 8);
+      this.camera.lookAt(0, 2, -8);
+    } else if (this.state.phase === 'playing') {
+      this.state.elapsed += dt;
+      this.state.storm = stormRadius(this.state.elapsed);
+      this.storm.scale.set(this.state.storm, 1, this.state.storm);
+      this.cooldown = Math.max(0, this.cooldown - dt);
+      this.recoil = Math.max(0, this.recoil - dt * 0.65);
+      this.state.hit = Math.max(0, this.state.hit - dt);
+      this.state.hurt = Math.max(0, this.state.hurt - dt);
+      if (this.reloadTimer > 0) {
+        this.reloadTimer -= dt;
+        if (this.reloadTimer <= 0) {
+          const i = this.state.weapon;
+          const reloaded = reloadAmmo(
+            this.weaponAmmo[i],
+            this.reserveAmmo[i],
+            WEAPONS[i].capacity,
+          );
+          this.weaponAmmo[i] = reloaded.ammo;
+          this.reserveAmmo[i] = reloaded.reserve;
+          this.state.reloading = false;
+        }
+      }
+      let mx =
+          Number(this.keys.has('KeyD')) -
+          Number(this.keys.has('KeyA')) +
+          this.touchMove.x,
+        mz =
+          Number(this.keys.has('KeyW')) -
+          Number(this.keys.has('KeyS')) -
+          this.touchMove.y;
+      const length = Math.hypot(mx, mz);
+      if (length > 1) {
+        mx /= length;
+        mz /= length;
+      }
+      const speed =
+        (this.keys.has('ShiftLeft') ? 11 : 7) * (this.aiming ? 0.6 : 1) * dt;
+      this.move(
+        this.position,
+        (mx * Math.cos(this.yaw) - mz * Math.sin(this.yaw)) * speed,
+        (-mx * Math.sin(this.yaw) - mz * Math.cos(this.yaw)) * speed,
+      );
+      if (this.keys.has('ArrowLeft')) this.yaw += dt * 1.5;
+      if (this.keys.has('ArrowRight')) this.yaw -= dt * 1.5;
+      this.velocityY -= 20 * dt;
+      this.position.y = Math.max(1.7, this.position.y + this.velocityY * dt);
+      if (this.position.y === 1.7) this.velocityY = 0;
+      this.camera.position.copy(this.position);
+      this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+      this.camera.fov = THREE.MathUtils.lerp(
+        this.camera.fov,
+        this.aiming ? (this.state.weapon === 2 ? 28 : 45) : 72,
+        dt * 12,
+      );
+      this.camera.updateProjectionMatrix();
+      this.gun.position.set(
+        this.aiming ? 0.025 : 0.28,
+        -0.25 + Math.sin(this.time * 10) * Math.min(length, 1) * 0.012,
+        -0.5 + this.recoil,
+      );
+      this.gun.rotation.set(
+        this.reloadTimer > 0 ? -0.6 : 0,
+        0,
+        this.reloadTimer > 0 ? -0.45 : 0,
+      );
+      this.gun.scale.setScalar(this.state.weapon === 1 ? 1.12 : 1);
+      this.flash.visible = this.recoil > 0.075;
+      if (this.shooting) this.shoot();
+      this.state.outside =
+        Math.hypot(this.position.x, this.position.z) > this.state.storm;
+      if (this.state.outside)
+        this.damage(dt * (this.state.elapsed > 180 ? 11 : 5));
+      if (this.state.phase === 'playing') this.updateBots(dt);
+      if (this.state.phase === 'playing' && this.state.alive <= 1)
+        this.finish(true);
+      const near = this.loot.find(
+        (l) =>
+          !l.used &&
+          Math.hypot(
+            l.mesh.position.x - this.position.x,
+            l.mesh.position.z - this.position.z,
+          ) < 3.8,
+      );
+      this.state.pickup = near
+        ? near.kind < 3
+          ? `${WEAPONS[near.kind].name} ammo`
+          : near.kind === 3
+            ? 'Shield cell +50'
+            : 'Med kit +45'
+        : '';
+      this.noticeTimer -= dt;
+      if (this.noticeTimer <= 0) this.state.notice = '';
+    }
+    for (const l of this.loot)
+      if (!l.used) {
+        l.mesh.children[0].rotation.y = this.time * 0.7;
+        l.mesh.children[0].position.y = 0.85 + Math.sin(this.time * 2) * 0.15;
+      }
+    this.tracers = this.tracers.filter((t) => {
+      t.life -= dt;
+      if (t.life <= 0) {
+        this.scene.remove(t.mesh);
+        t.mesh.geometry.dispose();
+        (t.mesh.material as THREE.Material).dispose();
+        return false;
+      }
+      return true;
+    });
+    this.uiTime += dt;
+    if (this.uiTime > 0.08) {
+      this.uiTime = 0;
+      if (this.state.phase === 'playing') this.emit();
+    }
+    this.renderer.render(this.scene, this.camera);
+    this.frame = requestAnimationFrame(this.tick);
+  };
+  emit() {
+    this.state.ammo = this.weaponAmmo[this.state.weapon];
+    this.state.reserve = this.reserveAmmo[this.state.weapon];
+    this.state.heading = ((((this.yaw * 180) / Math.PI) % 360) + 360) % 360;
+    this.state.x = this.position.x;
+    this.state.z = this.position.z;
+    this.state.bots = this.bots
+      .filter((b) => b.hp > 0)
+      .map((b) => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
+    this.onState({ ...this.state });
+  }
+  disposeObject(object: THREE.Object3D) {
+    object.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        o.geometry.dispose();
+        const materials = Array.isArray(o.material) ? o.material : [o.material];
+        materials.forEach((m) => m.dispose());
+      }
+    });
+  }
+  destroy() {
+    this.destroyed = true;
+    cancelAnimationFrame(this.frame);
+    this.observer.disconnect();
+    this.cleanup.forEach((fn) => fn());
+    if (document.pointerLockElement === this.renderer.domElement)
+      document.exitPointerLock();
+    this.disposeObject(this.scene);
+    for (const t of this.tracers) {
+      t.mesh.geometry.dispose();
+      (t.mesh.material as THREE.Material).dispose();
+    }
+    this.renderer.dispose();
+    this.renderer.domElement.remove();
+    void this.audio?.close();
+  }
+}

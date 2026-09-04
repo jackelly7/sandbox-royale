@@ -1,0 +1,112 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as THREE from 'three';
+import { BattleGame, type GameState } from '../lib/game/engine.ts';
+
+// Exercise Three.js geometry, raycasting, and match logic without a GPU or browser.
+function arena() {
+  const game = Object.create(BattleGame.prototype) as BattleGame;
+  Object.assign(game, {
+    scene: new THREE.Scene(),
+    world: new THREE.Group(),
+    camera: new THREE.PerspectiveCamera(72, 1, 0.08, 850),
+    bots: [],
+    loot: [],
+    colliders: [],
+    solids: [],
+    ray: new THREE.Raycaster(),
+    tracers: [],
+    weaponAmmo: [30, 6, 5],
+    reserveAmmo: [120, 30, 20],
+    cooldown: 0,
+    reloadTimer: 0,
+    recoil: 0,
+    aiming: false,
+    muted: true,
+    audio: null,
+    flash: new THREE.Mesh(),
+    onState: () => {},
+    position: new THREE.Vector3(0, 1.7, 50),
+    state: {
+      ammo: 5,
+      reserve: 20,
+      elapsed: 0,
+      storm: 107,
+      outside: false,
+      reloading: false,
+      pickup: '',
+      hurt: 0,
+      heading: 0,
+      x: 0,
+      z: 50,
+      rank: 16,
+      phase: 'playing',
+      health: 100,
+      shield: 50,
+      alive: 16,
+      kills: 0,
+      weapon: 2,
+      notice: '',
+      hit: 0,
+      bots: [],
+    } satisfies GameState,
+  });
+  game.scene.add(game.world, game.camera);
+  return game;
+}
+void test('a scoped headshot eliminates a rival and consumes exactly one round', () => {
+  const game = arena();
+  game.resetBots();
+  game.bots.forEach((b, i) => {
+    if (i > 0) {
+      b.hp = 0;
+      b.mesh.visible = false;
+    }
+  });
+  game.bots[0].mesh.position.set(0, 0, 0);
+  game.camera.position.set(0, 1.96, 10);
+  game.camera.lookAt(0, 1.96, 0);
+  game.aiming = true;
+  game.shoot();
+  assert.equal(game.weaponAmmo[2], 4);
+  assert.equal(game.state.kills, 1);
+  assert.equal(game.bots[0].mesh.visible, false);
+  assert.equal(game.state.alive, 1);
+  assert.ok(game.state.hit > 0);
+  game.disposeObject(game.scene);
+});
+void test('solid cover blocks a shot before it reaches an opponent', () => {
+  const game = arena();
+  game.resetBots();
+  game.bots[0].mesh.position.set(0, 0, 0);
+  const wall = game.box(8, 6, 1, '#999999', 0, 3, 5);
+  game.solid(wall);
+  game.camera.position.set(0, 1.96, 10);
+  game.camera.lookAt(0, 1.96, 0);
+  game.aiming = true;
+  game.shoot();
+  assert.equal(game.bots[0].hp, 100);
+  assert.equal(game.state.kills, 0);
+  assert.equal(
+    game.visible(new THREE.Vector3(0, 2, 10), new THREE.Vector3(0, 2, 0)),
+    false,
+  );
+  game.disposeObject(game.scene);
+});
+void test('island spawn and supplies are accessible outside solid buildings', () => {
+  const game = arena();
+  game.buildWorld();
+  game.resetBots();
+  assert.equal(game.blocked(0, 50), false);
+  for (const supply of game.loot)
+    assert.equal(
+      game.blocked(supply.mesh.position.x, supply.mesh.position.z),
+      false,
+      `Blocked pickup at ${supply.mesh.position.x}, ${supply.mesh.position.z}`,
+    );
+  assert.equal(game.bots.length, 15);
+  for (const bot of game.bots)
+    assert.equal(game.blocked(bot.mesh.position.x, bot.mesh.position.z), false);
+  assert.ok(game.colliders.length > 25);
+  game.disposeObject(game.scene);
+});
