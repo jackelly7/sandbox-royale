@@ -5,6 +5,7 @@ import {
   takeDamage,
   reloadAmmo,
   WEAPONS,
+  HEADSHOT_MULTIPLIER,
   cycleWeapon,
 } from '../lib/game/rules.ts';
 
@@ -38,4 +39,15 @@ void test('every weapon can finish an unshielded opponent with one magazine', ()
     assert.ok(weapon.damage * weapon.pellets * weapon.capacity >= 100);
     assert.ok(weapon.reload > weapon.interval);
   }
+});
+
+void test('fresh players survive any single full blast, including headshots', () => {
+  for (const weapon of WEAPONS)
+    assert.ok(weapon.damage * weapon.pellets * HEADSHOT_MULTIPLIER < 150);
+  assert.ok(Math.ceil(150 / WEAPONS[0].damage) >= 10);
+  assert.ok(Math.ceil(150 / (WEAPONS[1].damage * WEAPONS[1].pellets)) >= 3);
+  assert.ok(
+    WEAPONS[2].damage * HEADSHOT_MULTIPLIER < 100,
+    'Sniper headshot cannot one-shot full health',
+  );
 });

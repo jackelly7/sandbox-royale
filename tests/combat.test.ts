@@ -42,6 +42,7 @@ function arena() {
       storm: 107,
       outside: false,
       reloading: false,
+      aiming: false,
       pickup: '',
       hurt: 0,
       heading: 0,
@@ -82,7 +83,7 @@ function arena() {
   game.scene.add(game.world, game.camera);
   return game;
 }
-void test('a scoped headshot eliminates a rival and consumes exactly one round', () => {
+void test('a scoped finishing headshot eliminates a wounded rival and consumes one round', () => {
   const game = arena();
   game.resetBots();
   game.bots.forEach((b, i) => {
@@ -92,6 +93,7 @@ void test('a scoped headshot eliminates a rival and consumes exactly one round',
     }
   });
   game.bots[0].shield = 0;
+  game.bots[0].hp = 70;
   game.bots[0].mesh.position.set(0, 0, 0);
   game.camera.position.set(0, 1.96, 10);
   game.camera.lookAt(0, 1.96, 0);
@@ -341,4 +343,17 @@ void test('the parachute uses one draw and never absorbs bullets', () => {
       o.material.dispose();
     }
   });
+});
+
+void test('aiming a sniper clears its physical scope from the camera and restores it on release', () => {
+  const game = arena();
+  game.setAiming(true);
+  assert.equal(game.aiming, true);
+  assert.equal(game.state.aiming, true);
+  assert.equal(game.gun.visible, false);
+  game.setAiming(false);
+  assert.equal(game.gun.visible, true);
+  game.state.weapon = 0;
+  game.setAiming(true);
+  assert.equal(game.gun.visible, true);
 });

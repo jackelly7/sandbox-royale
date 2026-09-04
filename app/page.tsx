@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import {
   ArrowDown,
   ArrowLeft,
@@ -79,6 +80,7 @@ const initial: GameState = {
   storm: 107,
   outside: false,
   reloading: false,
+  aiming: false,
   pickup: '',
   notice: '',
   hit: 0,
@@ -392,11 +394,22 @@ export default function Home() {
       {lobby && (
         <>
           <header className="lobby-header">
-            <Link className="wordmark" href="/" aria-label="Lastlight home">
-              <span className="brand-icon">
-                <Zap size={23} fill="currentColor" />
+            <Link
+              className="wordmark"
+              href="/"
+              aria-label="Sandbox Royale home"
+            >
+              <Image
+                unoptimized
+                className="sandbox-logo"
+                src="/brand/sandbox-logo.png"
+                width={42}
+                height={42}
+                alt=""
+              />
+              <span className="sandbox-wordmark">
+                Sandbox<span>Royale</span>
               </span>
-              LASTLIGHT<span className="brand-dot">®</span>
             </Link>
             <div className="header-mode">
               <span className="live-dot" />{' '}
@@ -431,11 +444,9 @@ export default function Home() {
                 <span /> ONE ISLAND. ONE SURVIVOR.
               </div>
               <h1>
-                MAKE IT
+                Sandbox
                 <br />
-                TO THE
-                <br />
-                <span>LASTLIGHT.</span>
+                <span>Royale.</span>
               </h1>
               <p>
                 Drop in. Gear up. Outlast everyone.
@@ -473,7 +484,7 @@ export default function Home() {
               <div className="location-label">
                 <MapPin size={17} />
                 <div>
-                  SUNSET STATION<span>LASTLIGHT ISLAND</span>
+                  SUNSET STATION<span>SANDBOX ISLAND</span>
                 </div>
               </div>
             </div>
@@ -494,7 +505,7 @@ export default function Home() {
               </button>
               <div className="island-card-caption">
                 <div>
-                  <h2>Lastlight Island</h2>
+                  <h2>Sandbox Island</h2>
                   <p>Clear skies. Closing storm.</p>
                 </div>
                 <ArrowRight size={20} />
@@ -550,7 +561,7 @@ export default function Home() {
           </footer>
           <div className="bottom-bar">
             <span>
-              LASTLIGHT <span className="muted">/</span> FIELD TEST 01
+              SANDBOX ROYALE <span className="muted">/</span> BATTLE ROYALE
             </span>
             <span className="best-score">
               PERSONAL BEST <b>{best}</b> ELIMINATIONS
@@ -577,7 +588,15 @@ export default function Home() {
         <>
           <div className="hud-top">
             <div className="hud-brand">
-              <Zap size={20} fill="currentColor" /> LASTLIGHT
+              <Image
+                unoptimized
+                className="sandbox-logo"
+                src="/brand/sandbox-logo.png"
+                width={25}
+                height={25}
+                alt=""
+              />{' '}
+              SANDBOX ROYALE
             </div>
             <div className="compass">
               <span>W</span>
@@ -624,13 +643,25 @@ export default function Home() {
           </div>
           {playing && (
             <div
-              className={`crosshair ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
+              className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
             >
               <span />
               <span />
               <span />
               <span />
+              <i className="aim-dot" />
               {state.hit > 0 && <b>×</b>}
+            </div>
+          )}
+          {playing && state.aiming && state.weapon === 2 && (
+            <div
+              className="sniper-reticle"
+              aria-label="Sniper aiming crosshair"
+            >
+              <span className="scope-horizontal" />
+              <span className="scope-vertical" />
+              <i />
+              <small>3×</small>
             </div>
           )}
           <div className={`damage-flash ${state.hurt > 0 ? 'active' : ''}`} />
@@ -1014,6 +1045,14 @@ export default function Home() {
                 <Crosshair size={32} />
               </button>
               <button
+                className="touch-aim"
+                onClick={() => game.current?.setAiming(!state.aiming)}
+                aria-label="Toggle aim"
+                aria-pressed={state.aiming}
+              >
+                <Crosshair size={20} />
+              </button>
+              <button
                 className="touch-reload"
                 onClick={() => game.current?.reload()}
                 aria-label="Reload"
@@ -1090,7 +1129,7 @@ export default function Home() {
             <h2>
               {state.phase === 'won'
                 ? 'LAST ONE\nSTANDING.'
-                : 'UNTIL NEXT\nLASTLIGHT.'}
+                : 'NEXT ROUND.\nNEW CHANCE.'}
             </h2>
             <div className="result-stats">
               <div>
@@ -1202,7 +1241,7 @@ export default function Home() {
                 ? 'Find supplies, stay inside the storm, and outlast your rivals.'
                 : panel === 'settings'
                   ? 'Set up your next drop.'
-                  : 'Lastlight Island. Learn the routes. Find your cover.'}
+                  : 'Sandbox Island. Learn the routes. Find your cover.'}
           </DialogDescription>
           {panel === 'friends' && (
             <FriendsRoom

@@ -143,7 +143,7 @@ void test('server enforces weapon cooldown and resolves one winner for everyone'
   assert.equal(p.ammo[0], 29);
   shoot(at + 5101);
   assert.equal(p.ammo[0], 29);
-  for (let i = 1; i < 8; i++) shoot(at + 5100 + i * 120);
+  for (let i = 1; i < 12; i++) shoot(at + 5100 + i * 160);
   assert.equal(target.health, 0);
   assert.equal(target.rank, 2);
   assert.equal(p.kills, 1);
@@ -285,7 +285,7 @@ void test('incoming damage interrupts recovery and reports aggregated shield dam
     z: 15,
     y: 1.7,
     yaw: 0,
-    pitch: 0,
+    pitch: -0.04,
     weapon: 1,
     owned: [false, true, false],
     ammo: [0, 6, 0],
@@ -310,7 +310,12 @@ void test('incoming damage interrupts recovery and reports aggregated shield dam
   );
   assert.equal(hits[0].shieldDamage, 20);
   assert.equal(hits[0].shieldBreak, true);
-  assert.equal(hits[0].amount, 100);
+  assert.equal(hits[0].amount, 70);
+  assert.equal(
+    target.health,
+    30,
+    'One shotgun blast no longer instantly finishes this target',
+  );
 });
 void test('cancel, firing, reload, switching, storm and death preserve unused recovery items', () => {
   for (const action of [

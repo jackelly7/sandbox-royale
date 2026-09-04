@@ -1,4 +1,4 @@
-# LASTLIGHT
+# Sandbox Royale
 
 A browser-based first-person battle royale built with Three.js, React, and Vinext. Play solo against 15 AI rivals, or create a friend room for 2–8 human players.
 
@@ -61,3 +61,11 @@ Set `MULTIPLAYER_TEST_URL` to the full API endpoint to test another deployment. 
 `npm run test:realtime` runs eight simultaneous live sockets, reports movement latency, verifies shared parachute drops, unarmed landings and all three weapon pickups, rejects a ninth player, and checks command idempotency. Use `MULTIPLAYER_TEST_URL` to choose the WebSocket service HTTP origin.
 
 `npm run test:recovery` exercises a complete two-player drop, healing pickup, timed recovery, damage interruption, persistent killer identity, and rematch reset over real WebSockets. It uses the same `MULTIPLAYER_TEST_URL` option.
+
+## Branding
+
+The interface uses the supplied Sandbox logo, the black and white palette from https://web.sandbox.ing/, and its Affairs and Edu Diatype font assets. The existing multiplayer endpoint and local high-score storage key stay compatible with previous releases.
+
+## Aim and combat balance
+
+Right-click to aim, or toggle the aim button on touch screens. The sniper's physical model hides while scoped so its transparent 3× reticle has a clear sightline. AR and shotgun aim views keep the model below the center dot. Damage is 14 per AR bullet, 10 per shotgun pellet, and 50 per sniper round. Headshots multiply damage by 1.5. A fresh player with 100 health and 50 shields survives any single weapon blast, including a full shotgun headshot.

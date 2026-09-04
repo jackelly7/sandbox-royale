@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { MAP } from '../lib/game/map-data.ts';
 import {
   WEAPONS,
+  HEADSHOT_MULTIPLIER,
   stormRadius,
   takeDamage,
   reloadAmmo,
@@ -368,7 +369,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
         takeDamage(
           target.health,
           target.shield,
-          w.damage * (headshot ? 1.65 : 1),
+          w.damage * (headshot ? HEADSHOT_MULTIPLIER : 1),
         ),
       );
       const hit = hits.get(target.id) ?? {

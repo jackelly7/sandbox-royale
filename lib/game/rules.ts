@@ -3,8 +3,8 @@ export const WEAPONS = [
     name: 'Ranger AR',
     short: 'ASSAULT RIFLE',
     capacity: 30,
-    damage: 24,
-    interval: 0.115,
+    damage: 14,
+    interval: 0.14,
     reload: 1.65,
     spread: 0.007,
     pellets: 1,
@@ -14,7 +14,7 @@ export const WEAPONS = [
     name: 'Breach Shotgun',
     short: 'SHOTGUN',
     capacity: 6,
-    damage: 17,
+    damage: 10,
     interval: 0.8,
     reload: 2.1,
     spread: 0.052,
@@ -25,8 +25,8 @@ export const WEAPONS = [
     name: 'Longshot Sniper',
     short: 'SNIPER',
     capacity: 5,
-    damage: 78,
-    interval: 1.05,
+    damage: 50,
+    interval: 1.2,
     reload: 2.3,
     spread: 0.001,
     pellets: 1,
@@ -126,3 +126,5 @@ export function completeRecovery(state: RecoveryState, now: number) {
 
 export const DROP_HEIGHT = 42;
 export const DROP_SPEED = 6;
+
+export const HEADSHOT_MULTIPLIER = 1.5;

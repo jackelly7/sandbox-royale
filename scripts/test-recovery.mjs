@@ -159,7 +159,7 @@ try {
   console.log(
     'PASS incoming fire interrupts healing without spending the item; retry completes',
   );
-  for (let n = 0; n < 7 && mine(friend).health > 0; n++) {
+  for (let n = 0; n < 14 && mine(friend).health > 0; n++) {
     fire();
     await wait(250);
   }

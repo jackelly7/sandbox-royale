@@ -6,6 +6,7 @@ import type { Command, RoomSnapshot, PlayerPose } from './multiplayer.ts';
 import {
   BOT_COUNT,
   WEAPONS,
+  HEADSHOT_MULTIPLIER,
   stormRadius,
   takeDamage,
   reloadAmmo,
@@ -42,6 +43,7 @@ export type GameState = RecoveryState & {
   storm: number;
   outside: boolean;
   reloading: boolean;
+  aiming: boolean;
   pickup: string;
   notice: string;
   hit: number;
@@ -147,6 +149,7 @@ export class BattleGame {
     storm: 107,
     outside: false,
     reloading: false,
+    aiming: false,
     pickup: '',
     notice: '',
     hit: 0,
@@ -690,7 +693,12 @@ export class BattleGame {
   }
   showWeapon() {
     const index = this.state.weapon;
-    this.gun.visible = index >= 0 && this.state.owned[index];
+    this.gun.visible =
+      this.state.phase === 'playing' &&
+      this.state.health > 0 &&
+      index >= 0 &&
+      this.state.owned[index] &&
+      !(this.aiming && index === 2);
     this.gunModels?.forEach((model, i) => {
       model.visible = i === index;
     });
@@ -866,12 +874,12 @@ export class BattleGame {
     on(this.renderer.domElement, 'mousedown', ((e: MouseEvent) => {
       if (this.state.phase === 'playing') {
         if (e.button === 0) this.shooting = true;
-        if (e.button === 2) this.aiming = true;
+        if (e.button === 2) this.setAiming(true);
       }
     }) as EventListener);
     on(document, 'mouseup', (() => {
       this.shooting = false;
-      this.aiming = false;
+      if (!this.touch) this.setAiming(false);
     }) as EventListener);
     on(this.renderer.domElement, 'contextmenu', (e: Event) =>
       e.preventDefault(),
@@ -887,6 +895,16 @@ export class BattleGame {
     on(window, 'blur', (() => {
       if (this.state.phase === 'playing') this.pause();
     }) as EventListener);
+  }
+  setAiming(aiming: boolean) {
+    this.aiming =
+      aiming &&
+      this.state.phase === 'playing' &&
+      this.state.weapon >= 0 &&
+      !this.state.healing &&
+      !this.state.dropping;
+    this.showWeapon();
+    this.emit();
   }
   look(x: number, y: number) {
     this.yaw -= x * 0.002 * this.sensitivity;
@@ -954,6 +972,7 @@ export class BattleGame {
         pickup: '',
         outside: false,
         reloading: false,
+        aiming: false,
       };
       this.position.set(0, DROP_HEIGHT, 50);
       this.yaw = 0;
@@ -1129,6 +1148,7 @@ export class BattleGame {
     this.state.reloading = false;
     this.shooting = false;
     this.aiming = false;
+    this.showWeapon();
     this.state.healRemaining = SUPPLIES[item].seconds;
     this.sound(430, 0.1, 0.035, 'sine');
     this.emit();
@@ -1276,7 +1296,7 @@ export class BattleGame {
           const result = takeDamage(
             b.hp,
             b.shield,
-            w.damage * (headshot ? 1.65 : 1),
+            w.damage * (headshot ? HEADSHOT_MULTIPLIER : 1),
           );
           b.hp = result.health;
           b.shield = result.shield;
@@ -1707,8 +1727,9 @@ export class BattleGame {
       );
       this.camera.updateProjectionMatrix();
       this.gun.position.set(
-        this.aiming ? 0.025 : 0.28,
-        -0.25 + Math.sin(this.time * 10) * Math.min(length, 1) * 0.012,
+        this.aiming ? 0.18 : 0.28,
+        (this.aiming ? -0.33 : -0.28) +
+          Math.sin(this.time * 10) * Math.min(length, 1) * 0.012,
         -0.5 + this.recoil,
       );
       this.gun.rotation.set(
@@ -1868,6 +1889,7 @@ export class BattleGame {
     this.frame = requestAnimationFrame(this.tick);
   }
   emit() {
+    this.state.aiming = this.aiming;
     this.state.dropLoot = [];
     if (this.state.dropping && this.state.phase === 'playing') {
       this.camera.updateMatrixWorld();

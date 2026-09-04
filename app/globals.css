@@ -7,7 +7,7 @@
   --color-popover: var(--popover);
   --color-popover-foreground: var(--foreground);
   --color-primary: var(--primary);
-  --color-primary-foreground: #173c42;
+  --color-primary-foreground: #0f0f0f;
   --color-muted: #31545a;
   --color-muted-foreground: #adc0bd;
   --color-border: #426367;
@@ -18,14 +18,17 @@
   --font-heading: var(--font-display);
 }
 :root {
-  --background: #163c42;
-  --foreground: #f6f3df;
-  --popover: #193e44;
-  --primary: #f6cf78;
-  --sand: #f6f3df;
-  --sun: #f6cf78;
+  --font-body: 'Sandbox Diatype', Arial, sans-serif;
+  --font-display: 'Sandbox Diatype', Arial, sans-serif;
+  --font-editorial: 'Sandbox Affairs', Georgia, serif;
+  --background: #0f0f0f;
+  --foreground: #f6f6f6;
+  --popover: #191919;
+  --primary: #f6f6f6;
+  --sand: #f6f6f6;
+  --sun: #f6f6f6;
   --coral: #ec8c70;
-  --ink: #153c42;
+  --ink: #0f0f0f;
   --mint: #9cd8c5;
 }
 * {
@@ -328,7 +331,7 @@ h1 > span {
   right: 0;
   bottom: 10px;
   width: 230px;
-  background: #173d46ed;
+  background: #171717ed;
   border: 1px solid #ffffff25;
   box-shadow: 0 15px 40px #153a4a1c;
 }
@@ -416,7 +419,7 @@ h1 > span {
   align-items: center;
   gap: 16px;
   min-width: 310px;
-  background: #133940b3;
+  background: #151515b3;
   border: 1px solid #ffffff36;
   padding: 16px 20px;
   backdrop-filter: blur(10px);
@@ -458,7 +461,7 @@ h1 > span {
 }
 .deploy-button {
   background: var(--sun);
-  color: #1e3e43;
+  color: #0f0f0f;
   border: none;
   display: flex;
   align-items: center;
@@ -575,14 +578,14 @@ h1 > span {
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.5px;
-  text-shadow: 0 2px 4px #153c4250;
+  text-shadow: 0 2px 4px #14141450;
 }
 .hud-brand svg {
   color: var(--sun);
 }
 .hud-pause {
   pointer-events: auto;
-  background: #173c4266;
+  background: #0f0f0f66;
 }
 .compass {
   position: absolute;
@@ -740,7 +743,7 @@ h1 > span {
   font-size: 15px;
   text-align: center;
   font-weight: 600;
-  text-shadow: 0 2px 4px #153c42;
+  text-shadow: 0 2px 4px #141414;
   pointer-events: none;
   max-width: 90%;
 }
@@ -752,7 +755,7 @@ h1 > span {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #173c42d9;
+  background: #0f0f0fd9;
   border: 1px solid #efefd654;
   padding: 12px 18px;
   font-size: 10px;
@@ -842,14 +845,14 @@ h1 > span {
   width: 88px;
   height: 74px;
   padding: 9px 5px 7px;
-  background: #173e48b3;
+  background: #1c1c1cb3;
   border: 1px solid #ffffff2e;
   border-bottom: 3px solid var(--weapon-color);
   position: relative;
 }
 .weapon-slot.selected {
   border-color: var(--weapon-color);
-  background: #254f55d9;
+  background: #333333d9;
   transform: translateY(-5px);
 }
 .weapon-slot svg {
@@ -1035,7 +1038,7 @@ kbd {
   width: calc(100% - 36px) !important;
   border: 1px solid #819d8c66 !important;
   border-radius: 2px !important;
-  background: #193e44 !important;
+  background: #191919 !important;
   padding: 34px !important;
   box-shadow: 0 35px 150px #082d4399;
   color: var(--sand);
@@ -1243,7 +1246,7 @@ kbd {
   height: 43px;
   border: 1px solid #ffffff66;
   border-radius: 50%;
-  background: #24495080;
+  background: #25252580;
   display: grid;
   place-items: center;
   pointer-events: auto;
@@ -1875,7 +1878,7 @@ kbd {
 .join-button {
   width: 52px;
   background: #a1d6bf;
-  color: #163c42;
+  color: #171717;
   border: 0;
   display: grid;
   place-items: center;
@@ -1992,7 +1995,7 @@ kbd {
   font-size: 9px;
   letter-spacing: 1px;
   color: #d4dfc8;
-  background: #153c4277;
+  background: #14141477;
   padding: 7px 10px;
   z-index: 10;
 }
@@ -2011,7 +2014,7 @@ kbd {
   color: var(--sun);
   z-index: 15;
   text-align: center;
-  text-shadow: 0 3px 10px #163c4277;
+  text-shadow: 0 3px 10px #17171777;
 }
 .match-countdown span {
   display: block;
@@ -2081,7 +2084,7 @@ kbd {
   gap: 5px 7px;
   min-width: 139px;
   padding: 9px 10px;
-  background: #102e3aee;
+  background: #171717ee;
   border: 1px solid #a7c9c66b;
   border-radius: 4px;
   font-size: 12px;
@@ -2117,7 +2120,7 @@ kbd {
 }
 .vitals {
   padding: 10px 14px;
-  background: #102d36d9;
+  background: #171717d9;
   border: 1px solid #a7c9c640;
   border-radius: 4px;
 }
@@ -2148,7 +2151,7 @@ kbd {
   align-items: center;
   gap: 8px;
   padding: 7px 11px;
-  background: #102d37cf;
+  background: #171717cf;
   border-left: 2px solid #eabb81;
   font-size: 13px;
   text-shadow: 0 1px 2px #000;
@@ -2231,7 +2234,7 @@ kbd {
   display: flex;
   align-items: center;
   gap: 15px;
-  background: #102e39f2;
+  background: #191919f2;
   border: 1px solid #94e6cb;
   border-radius: 5px;
   padding: 16px;
@@ -2284,7 +2287,7 @@ kbd {
   left: 50%;
   transform: translateX(-50%);
   width: min(530px, 94vw);
-  background: #102e3af2;
+  background: #171717f2;
   border: 1px solid #8bb1b6;
   padding: 18px 22px;
   text-align: center;
@@ -2333,14 +2336,14 @@ kbd {
   display: flex;
   align-items: center;
   gap: 7px;
-  background: #28515d;
+  background: #303030;
   border: 1px solid #8bb1b655;
   padding: 8px 12px;
   border-radius: 3px;
   font-size: 14px;
 }
 .spectator-buttons button:hover {
-  background: #386778;
+  background: #444444;
 }
 .spectator-panel small {
   font-size: 12px;
@@ -2372,7 +2375,7 @@ kbd {
   margin: 18px 0;
   text-align: left;
   border: 1px solid #aecbc84a;
-  background: #143039;
+  background: #151515;
 }
 .scoreboard > div {
   display: flex;
@@ -2547,7 +2550,7 @@ kbd {
   align-items: center;
   color: #ffe1a1;
   padding: 10px 16px;
-  background: #16343ef0;
+  background: #191919f0;
   border-bottom: 2px solid #ffd17e;
   font-size: 15px;
   font-weight: 800;
@@ -2560,7 +2563,7 @@ kbd {
   transform: translateX(-50%);
   text-align: center;
   padding: 15px 20px;
-  background: #103442e8;
+  background: #191919e8;
   border-top: 2px solid #edcb85;
   min-width: 320px;
   max-width: 94vw;
@@ -2664,5 +2667,323 @@ kbd {
   }
   .drop-guidance strong {
     font-size: 26px;
+  }
+}
+
+@font-face {
+  font-family: 'Sandbox Diatype';
+  src: url('/brand/diatype-regular.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Sandbox Diatype';
+  src: url('/brand/diatype-bold.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Sandbox Affairs';
+  src: url('/brand/affairs.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
+/* Sandbox Education's monochrome identity, with game-state colors kept legible. */
+.lobby-shade {
+  background:
+    linear-gradient(
+      90deg,
+      #0f0f0ff2 0%,
+      #0f0f0fd9 28%,
+      #0f0f0f38 65%,
+      #0f0f0f15 100%
+    ),
+    linear-gradient(0deg, #0f0f0ff0 0%, #0f0f0f00 45%, #0f0f0f66 100%);
+}
+.sandbox-logo {
+  display: block;
+  flex: none;
+  object-fit: contain;
+  background: #f6f6f6;
+  border: 3px solid #f6f6f6;
+}
+.wordmark {
+  gap: 12px;
+  letter-spacing: -0.7px;
+}
+.sandbox-wordmark {
+  display: flex;
+  flex-direction: column;
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1;
+}
+.sandbox-wordmark > span {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+.title-block h1 {
+  font-family: var(--font-editorial);
+  font-weight: 400;
+  font-size: clamp(76px, 8.5vw, 132px);
+  line-height: 0.96;
+  letter-spacing: -3px;
+  transform: none;
+  margin: 22px 0 26px;
+}
+.title-block h1 > span {
+  color: #f6f6f6;
+}
+.title-block > p {
+  font-size: 16px;
+  color: #d5d5d5;
+}
+.eyebrow,
+.header-mode,
+.location-label,
+.footer-note,
+.bottom-bar {
+  color: #cecece;
+}
+.friend-launch {
+  background: #f6f6f6;
+  border-color: #f6f6f6;
+  color: #0f0f0f;
+  font-size: 14px;
+}
+.friend-launch > svg {
+  color: #0f0f0f;
+}
+.deploy-button {
+  background: #f6f6f6;
+  color: #0f0f0f;
+  box-shadow: none;
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+}
+.deploy-button::after {
+  display: none;
+}
+.deployment-card {
+  backdrop-filter: none;
+  background: #0f0f0fe6;
+}
+.deployment-card p,
+.island-card p {
+  color: #bababa;
+  font-size: 12px;
+}
+.island-card h2 {
+  font-family: var(--font-editorial);
+  font-size: 22px;
+  font-weight: 400;
+}
+.player-avatar {
+  background: #f6f6f6;
+  color: #0f0f0f;
+  border-color: #f6f6f6;
+}
+.player-badge > div > span,
+.card-eyebrow > span:last-child {
+  color: #bcbcbc;
+}
+.hud-brand {
+  font-size: 17px;
+  letter-spacing: 0.2px;
+}
+.hud-brand .sandbox-logo {
+  width: 25px;
+  height: 25px;
+  border-width: 2px;
+}
+.game-dialog {
+  background: #191919 !important;
+  border-color: #777777 !important;
+  box-shadow: 0 35px 150px #00000099;
+}
+.game-dialog [data-slot='dialog-title'],
+.pause-panel h2,
+.result-panel h2 {
+  font-family: var(--font-editorial);
+  font-weight: 400;
+  letter-spacing: -1px;
+}
+.pause-overlay {
+  background: #0f0f0fa6;
+}
+.room-input {
+  background: #101010 !important;
+  border-color: #737373 !important;
+}
+.secondary-button {
+  background: #292929;
+  border-color: #747474;
+}
+.room-avatar {
+  background: #303030;
+  color: #f6f6f6;
+}
+.room-share {
+  border-color: #737373;
+}
+.result-icon {
+  border-color: #eeeeee88;
+  background: #eeeeee0d;
+}
+@media (max-height: 750px) and (min-width: 701px) {
+  .title-block h1 {
+    font-size: clamp(64px, 7.4vw, 104px);
+    margin: 16px 0;
+  }
+}
+@media (max-width: 700px) {
+  .sandbox-logo {
+    width: 33px;
+    height: 33px;
+  }
+  .sandbox-wordmark {
+    font-size: 20px;
+  }
+  .sandbox-wordmark > span {
+    font-size: 10px;
+    letter-spacing: 2px;
+  }
+  .title-block h1 {
+    font-size: clamp(66px, 14vw, 94px);
+    letter-spacing: -2px;
+    margin: 18px 0;
+  }
+  .title-block > p {
+    font-size: 14px;
+  }
+  .deploy-button {
+    font-size: 18px;
+  }
+  .hud-brand {
+    font-size: 12px;
+    gap: 6px;
+  }
+}
+@media (max-height: 610px) {
+  .title-block h1 {
+    font-size: 65px;
+    margin: 12px 0;
+  }
+}
+
+/* A clear sightline: reticles stay centered while the weapon sits below them. */
+.crosshair {
+  z-index: 2;
+  filter: drop-shadow(0 0 2px #000) drop-shadow(0 1px 1px #000);
+}
+.crosshair > span {
+  background: #fff;
+  box-shadow: 0 0 0 1px #000b;
+}
+.aim-dot {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 1px #000;
+}
+.crosshair.ads {
+  transform: translate(-50%, -50%) scale(0.8);
+}
+.crosshair.shotgun-reticle::before {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  border: 1px solid #fffe;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px #0008;
+}
+.crosshair.scoped > span,
+.crosshair.scoped .aim-dot {
+  display: none;
+}
+.sniper-reticle {
+  position: absolute;
+  z-index: 1;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(62vh, 74vw);
+  aspect-ratio: 1;
+  border: 1px solid #ffffff70;
+  border-radius: 50%;
+  pointer-events: none;
+  filter: drop-shadow(0 1px 1px #000);
+}
+.scope-horizontal,
+.scope-vertical {
+  position: absolute;
+  background: #ffffffdf;
+  box-shadow: 0 0 0 1px #0008;
+}
+.scope-horizontal {
+  left: 0;
+  right: 0;
+  top: calc(50% - 0.5px);
+  height: 1px;
+}
+.scope-vertical {
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 0.5px);
+  width: 1px;
+}
+.sniper-reticle > i {
+  position: absolute;
+  top: calc(50% - 2px);
+  left: calc(50% - 2px);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #ff6262;
+  box-shadow: 0 0 0 2px #141414;
+}
+.sniper-reticle small {
+  position: absolute;
+  left: calc(50% + 12px);
+  bottom: 12px;
+  font-size: 13px;
+  color: white;
+}
+.touch-aim {
+  position: absolute;
+  right: 120px;
+  bottom: 190px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #fff8;
+  border-radius: 50%;
+  background: #222c;
+  pointer-events: auto;
+}
+.touch-aim[aria-pressed='true'] {
+  color: #111;
+  background: #fff;
+}
+@media (max-width: 700px) {
+  .touch-aim {
+    right: 100px;
+    bottom: 205px;
+  }
+}
+@media (max-height: 610px) {
+  .touch-aim {
+    right: 120px;
+    bottom: 160px;
   }
 }
