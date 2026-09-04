@@ -2,6 +2,15 @@ import * as THREE from 'three';
 import { footstepDirection } from './sound-cues.ts';
 import { parachuteModel } from './parachute.ts';
 import { weaponModel } from './weapon-models.ts';
+import {
+  characterModel,
+  skinIndex,
+  animateCharacter,
+  setCharacterSkin,
+} from './character-models.ts';
+import { supplyModel } from './supply-models.ts';
+import { LootInstances } from './loot-instances.ts';
+import { chamferBox } from './model-kit.ts';
 import { batchIsland } from './render-world.ts';
 import type { Command, RoomSnapshot, PlayerPose } from './multiplayer.ts';
 import {
@@ -126,6 +135,7 @@ const names = [
   'Nomad',
 ];
 export class BattleGame {
+  lootInstances?: LootInstances;
   footsteps = new Map<
     string,
     { x: number; z: number; until: number; nextAt: number }
@@ -340,10 +350,27 @@ export class BattleGame {
     beach.receiveShadow = true;
     this.world.add(beach);
     const island = new THREE.Mesh(
-      new THREE.BoxGeometry(226, 5, 226),
+      new THREE.PlaneGeometry(226, 226, 14, 14),
       this.material('#e8c780'),
     );
-    island.position.y = -2.5;
+    island.rotation.x = -Math.PI / 2;
+    island.position.y = 0;
+    const sandPositions = island.geometry.getAttribute('position');
+    const sandColors = new Float32Array(sandPositions.count * 3);
+    for (let i = 0; i < sandPositions.count; i++) {
+      const x = sandPositions.getX(i),
+        z = sandPositions.getY(i);
+      const shade =
+        0.93 +
+        Math.sin(x * 0.08 + Math.sin(z * 0.05)) * 0.045 +
+        Math.cos(z * 0.11) * 0.025;
+      sandColors.set([shade, shade, shade], i * 3);
+    }
+    island.geometry.setAttribute(
+      'color',
+      new THREE.BufferAttribute(sandColors, 3),
+    );
+    island.material.vertexColors = true;
     island.receiveShadow = true;
     this.world.add(island);
     // A full-size wooden toy box frames the playable sandy arena.
@@ -398,7 +425,12 @@ export class BattleGame {
       h: number,
       color: string,
     ) => {
-      const base = this.box(w, h, d, color, x, h / 2, z);
+      const base = new THREE.Mesh(
+        chamferBox(w, h, d, 0.24),
+        this.material(color),
+      );
+      base.position.set(x, h / 2, z);
+      this.world.add(base);
       this.solid(base);
       this.box(w + 0.8, 0.45, d + 0.8, '#f2e0b6', x, h, z);
       this.box(w + 0.4, 0.28, d + 0.4, color, x, h + 0.35, z);
@@ -553,10 +585,18 @@ export class BattleGame {
       [-48, 43],
       [-32, -44],
     ]) {
-      const c = this.box(2.4, 2.4, 2.4, '#99764e', x, 1.2, z);
+      const c = new THREE.Mesh(
+        chamferBox(2.4, 2.4, 2.4, 0.16),
+        this.material('#778f9b'),
+      );
+      c.position.set(x, 1.2, z);
+      this.world.add(c);
       this.solid(c);
-      this.box(2.5, 0.2, 2.5, '#d0a671', x, 0.3, z);
-      this.box(2.5, 0.2, 2.5, '#d0a671', x, 2.1, z);
+      this.box(2.5, 0.2, 2.5, '#d8b777', x, 0.3, z);
+      this.box(2.5, 0.2, 2.5, '#d8b777', x, 2.1, z);
+      this.box(0.85, 0.85, 0.03, '#334750', x, 1.2, z + 1.215);
+      const stripe = this.box(0.12, 0.75, 0.04, '#f2dfba', x, 1.2, z + 1.24);
+      stripe.rotation.z = Math.PI / 4;
     }
     // Outlying islets and clouds create depth without extra game space.
     for (let i = 0; i < 12; i++) {
@@ -569,11 +609,11 @@ export class BattleGame {
       m.position.set(Math.cos(a) * r, -2, Math.sin(a) * r);
       this.world.add(m);
     }
-    for (let i = 0; i < 18; i++) {
+    for (let i = 0; i < 8; i++) {
       const g = new THREE.Group();
-      for (let j = 0; j < 4; j++) {
+      for (let j = 0; j < 3; j++) {
         const c = new THREE.Mesh(
-          new THREE.IcosahedronGeometry(7 + rand() * 4, 1),
+          new THREE.IcosahedronGeometry(7 + rand() * 4, 0),
           this.material('#f4eee0', { flatShading: true }),
         );
         c.scale.set(1.7, 0.45, 1);
@@ -652,6 +692,11 @@ export class BattleGame {
     }
   }
   spawnLoot() {
+    if (this.lootInstances) {
+      this.world.remove(this.lootInstances.root);
+      this.disposeObject(this.lootInstances.root);
+      this.lootInstances = undefined;
+    }
     for (const l of this.loot) {
       this.world.remove(l.mesh);
       this.disposeObject(l.mesh);
@@ -709,33 +754,23 @@ export class BattleGame {
         model.position.y = 0.95;
         group.add(model);
       } else {
-        const item = new THREE.Group();
-        if (kind === 3) {
-          const bottle = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.28, 0.28, 0.8, 8),
-            this.material(colors[kind]),
-          );
-          item.add(bottle);
-          this.box(0.4, 0.16, 0.4, '#d9f6ff', 0, 0.45, 0, item);
-        } else this.box(0.7, 0.8, 0.5, colors[kind], 0, 0, 0, item);
-        this.box(kind === 4 ? 0.5 : 0.73, 0.13, 0.53, '#fff8de', 0, 0, 0, item);
-        if (kind === 4) this.box(0.13, 0.5, 0.53, '#fff8de', 0, 0, 0, item);
-        batchIsland(item, [], Infinity);
+        const item = supplyModel(kind);
         item.position.y = 0.85;
         group.add(item);
       }
       const ring = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.9, 0.9, 0.05, 20),
+        new THREE.RingGeometry(0.7, 0.92, 6),
         new THREE.MeshBasicMaterial({
           color: colors[kind],
           transparent: true,
           opacity: 0.35,
         }),
       );
+      ring.rotation.x = -Math.PI / 2;
       ring.position.y = 0.07;
       group.add(ring);
       const beam = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.11, 0.5, 5, 6, 1, true),
+        new THREE.CylinderGeometry(0.11, 0.5, 5, 4, 1, true),
         new THREE.MeshBasicMaterial({
           color: colors[kind],
           transparent: true,
@@ -749,11 +784,13 @@ export class BattleGame {
       this.world.add(group);
       this.loot.push({ mesh: group, kind, used: false });
     });
+    this.lootInstances = new LootInstances(this.loot);
+    this.world.add(this.lootInstances.root);
   }
   buildGun() {
     this.camera.add(this.gun);
     this.gunModels = WEAPONS.map((_, i) => {
-      const model = weaponModel(i);
+      const model = weaponModel(i, 'held');
       model.visible = false;
       this.gun.add(model);
       return model;
@@ -844,16 +881,7 @@ export class BattleGame {
     }
     this.bots = [];
     for (let i = 0; i < count; i++) {
-      const g = new THREE.Group(),
-        color = ['#d77a5c', '#638bad', '#bcaa74', '#925f83'][i % 4];
-      this.box(0.72, 0.88, 0.4, color, 0, 1.25, 0, g);
-      this.box(0.5, 0.5, 0.5, '#d8ad83', 0, 1.96, 0, g);
-      this.box(0.54, 0.16, 0.53, '#344a4d', 0, 2.2, 0, g);
-      this.box(0.44, 0.15, 0.03, '#253e43', 0, 1.98, 0.26, g);
-      for (const s of [-1, 1]) {
-        this.box(0.24, 0.77, 0.26, '#3c5556', s * 0.22, 0.4, 0, g);
-        this.box(0.24, 0.65, 0.26, color, s * 0.49, 1.29, 0.1, g);
-      }
+      const g = characterModel(i % 4);
       const held = weaponModel(i % 3);
       held.name = 'Bot weapon';
       held.userData.weapon = i % 3;
@@ -1725,8 +1753,7 @@ export class BattleGame {
       }
       if (p.distanceToSquared(old) > 0.0001) this.hearStep(b.name, p.x, p.z);
       b.mesh.rotation.y = angle;
-      b.mesh.children[4].rotation.x = Math.sin(this.time * 9 + b.seed) * 0.3;
-      b.mesh.children[6].rotation.x = -Math.sin(this.time * 9 + b.seed) * 0.3;
+      animateCharacter(b.mesh, this.time * 9 + b.seed, speed > 0 ? 0.3 : 0);
       if (!safe) {
         b.hp -= dt * (this.state.elapsed > 160 ? 5 : 2);
         if (b.hp <= 0) {
@@ -1976,8 +2003,11 @@ export class BattleGame {
         const target = this.remoteTargets[i];
         if (target && b.hp > 0) {
           b.mesh.position.lerp(target, Math.min(1, dt * 15));
-          b.mesh.children[4].rotation.x = Math.sin(this.time * 9) * 0.2;
-          b.mesh.children[6].rotation.x = -Math.sin(this.time * 9) * 0.2;
+          animateCharacter(
+            b.mesh,
+            this.time * 9,
+            b.mesh.position.distanceToSquared(target) > 0.001 ? 0.25 : 0,
+          );
         }
       });
       this.networkTime += dt;
@@ -2029,11 +2059,7 @@ export class BattleGame {
         };
       }
     }
-    for (const l of this.loot)
-      if (!l.used) {
-        l.mesh.children[0].rotation.y = this.time * 0.7;
-        l.mesh.children[0].position.y = 0.85 + Math.sin(this.time * 2) * 0.15;
-      }
+    this.lootInstances?.update(this.time);
     this.tracers = this.tracers.filter((t) => {
       t.life -= dt;
       if (t.life <= 0) {
@@ -2283,6 +2309,7 @@ export class BattleGame {
     this.remoteTargets = remotes.map((p, i) => {
       const b = this.bots[i];
       if (newRound) b.mesh.position.set(p.x, p.y - 1.7, p.z);
+      setCharacterSkin(b.mesh, skinIndex(p.name));
       const teammate = room.mode === 'duos' && me.team === p.team;
       const label = `${teammate ? '◆ ' : ''}${p.name}${p.downed ? ' · DOWN' : ''}`;
       const previous = previousRoom?.players.find((q) => q.id === p.id);

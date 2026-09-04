@@ -14,20 +14,32 @@ export function batchIsland(
   const sources: THREE.Mesh[] = [];
   const chunks = new Map<string, THREE.BufferGeometry[]>();
   world.traverse((object) => {
-    if (!(object instanceof THREE.Mesh) || excluded.has(object)) return;
+    if (
+      !(object instanceof THREE.Mesh) ||
+      object instanceof THREE.InstancedMesh ||
+      excluded.has(object)
+    )
+      return;
     if (!(object.material instanceof THREE.MeshStandardMaterial)) return;
     sources.push(object);
     const geometry = object.geometry.index
       ? object.geometry.toNonIndexed()
       : object.geometry.clone();
     geometry.applyMatrix4(object.matrixWorld);
+    const existingColors = geometry.getAttribute('color');
     for (const name of Object.keys(geometry.attributes))
-      if (name !== 'position' && name !== 'normal')
+      if (name !== 'position' && name !== 'normal' && name !== 'color')
         geometry.deleteAttribute(name);
     const count = geometry.getAttribute('position').count;
     const colors = new Float32Array(count * 3);
-    for (let i = 0; i < count; i++)
-      object.material.color.toArray(colors, i * 3);
+    const tint = object.material.color;
+    for (let i = 0; i < count; i++) {
+      colors[i * 3] = tint.r * (existingColors ? existingColors.getX(i) : 1);
+      colors[i * 3 + 1] =
+        tint.g * (existingColors ? existingColors.getY(i) : 1);
+      colors[i * 3 + 2] =
+        tint.b * (existingColors ? existingColors.getZ(i) : 1);
+    }
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     const point = new THREE.Vector3().setFromMatrixPosition(object.matrixWorld);
     const key = `${Math.floor(point.x / cellSize)},${Math.floor(point.z / cellSize)}`;

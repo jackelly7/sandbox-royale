@@ -7,11 +7,22 @@ export function parachuteModel() {
   const canopy = new THREE.Mesh(
     new THREE.SphereGeometry(3.3, 12, 5, 0, Math.PI * 2, 0, Math.PI / 2),
     new THREE.MeshStandardMaterial({
-      color: '#f2bc69',
+      color: '#ffffff',
+      vertexColors: true,
       side: THREE.DoubleSide,
       roughness: 1,
     }),
   );
+  const position = canopy.geometry.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  for (let i = 0; i < position.count; i++) {
+    const angle = Math.atan2(position.getZ(i), position.getX(i));
+    const segment = Math.floor(((angle + Math.PI) / Math.PI) * 6);
+    new THREE.Color(
+      segment % 3 === 0 ? '#e9dfb9' : segment % 3 === 1 ? '#5eada7' : '#efad62',
+    ).toArray(colors, i * 3);
+  }
+  canopy.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   canopy.scale.y = 0.4;
   canopy.position.y = 5;
   group.add(canopy);
