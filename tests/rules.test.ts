@@ -5,6 +5,7 @@ import {
   takeDamage,
   reloadAmmo,
   WEAPONS,
+  cycleWeapon,
 } from '../lib/game/rules.ts';
 
 void test('storm gives players a grace period then closes continuously to the final circle', () => {
@@ -13,6 +14,13 @@ void test('storm gives players a grace period then closes continuously to the fi
   assert.ok(stormRadius(100) < stormRadius(50));
   assert.equal(stormRadius(270), 5);
   assert.equal(stormRadius(900), 5);
+});
+void test('weapon wheel wraps and skips weapons not collected', () => {
+  assert.equal(cycleWeapon(-1, [false, false, false], 1), -1);
+  assert.equal(cycleWeapon(0, [true, false, true], 1), 2);
+  assert.equal(cycleWeapon(2, [true, false, true], 1), 0);
+  assert.equal(cycleWeapon(0, [true, false, true], -1), 2);
+  assert.equal(cycleWeapon(1, [false, true, false], 1), 1);
 });
 void test('shield absorbs incoming damage and overflow reduces health', () => {
   assert.deepEqual(takeDamage(100, 50, 24), { health: 100, shield: 26 });

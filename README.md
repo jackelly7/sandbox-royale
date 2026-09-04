@@ -19,19 +19,21 @@ npm install
 npm run dev
 ```
 
-Open the URL printed by the server. WebGL 2 is required. WASD moves, mouse aims, left click fires, right click zooms, Shift sprints, Space jumps, R reloads, E collects supplies, and 1–3 switches weapons. Escape opens the menu. Touch controls are available in Settings.
+Open the URL printed by the server. WebGL 2 is required. WASD moves, mouse aims, left click fires, right click zooms, Shift sprints, Space jumps, R reloads, E collects supplies, and 1–3 or the scroll wheel switches collected weapons. Escape opens the menu. Touch controls are available in Settings.
 
-Multiplayer uses the same-origin `/api/multiplayer` endpoint. Set `MULTIPLAYER_DATABASE_URL` in an ignored `.dev.vars` file for local development and in Sites secrets for deployment. Apply `server/schema.sql` to the dedicated multiplayer database. Its identifiers are in `server/deployment.json`.
+Room creation and joins use the same-origin `/api/multiplayer` endpoint. Live gameplay connects directly to the Neon WebSocket endpoint in `lib/game/network-config.ts`. Set `MULTIPLAYER_DATABASE_URL` in an ignored `.dev.vars` file for local development and in Sites secrets for deployment. Apply `server/schema.sql` to the dedicated multiplayer database. Its identifiers are in `server/deployment.json`.
 
 ## Multiplayer architecture
 
-The browser sends batches of commands and receives server snapshots through the game host. The server validates movement, cover, weapon cooldowns, ammo, damage, loot collection, room capacity, match starts, storm timing, and winners. Each player has a random session credential; only its hash is stored, and credentials are excluded from snapshots and URLs.
+The browser sends movement and actions over a persistent authenticated WebSocket. Each server process batches all inputs for a room every 50 ms, advances the authoritative match under a Postgres row lock, and broadcasts snapshots with per-player sequence acknowledgments. The database and WebSocket server run in the same region. Separate processes share the same room state, retries cannot fire a shot twice, and clients predict local movement and interpolate opponents.
 
-Postgres stores room state. An authenticated command queue batches inputs from all players. A short database lease gives one request at a time authority to advance a room; revision checks prevent stale workers from overwriting newer state. This keeps separate server processes consistent. Command sequence numbers make retries safe. Clients exchange state up to ten times per second, coalesce movement, and interpolate remote players. There is only one request in flight per player. This architecture targets small friend matches, with basic abuse prevention; it is not a competitive anti-cheat system.
+The server validates inventory ownership, movement, cover, weapon cooldowns, ammo, damage, exclusive loot collection, capacity, starts, storm timing, and winners. Every player starts with no guns or ammo. Collecting the first AR, shotgun, or sniper loads its magazine and equips it; duplicate pickups add reserve ammo. Gamertags appear above opponents and weapon selection skips uncollected slots.
+
+Static island geometry is combined into spatial batches instead of hundreds of individual draw calls. Live shadows are disabled, weapon models use one draw call each, resolution adapts on slow devices, rendering stops behind forms, and high-frequency movement does not drive React on every frame. These changes target small friend matches, with basic abuse prevention rather than competitive anti-cheat.
 
 Map collision data comes from the same geometry rendered in the browser. After changing the island, run `npm run map:export` and commit the generated data.
 
-The optional WebSocket transport lives in `server/index.ts` and can run locally with `DATABASE_URL` and `npm run server:dev`. Its Neon Functions deployment is currently unavailable due to a provider build-service error. The published game uses the same-origin HTTP transport and does not depend on that function. `npm run server:build` produces a bundle for a future WebSocket deployment.
+The live WebSocket server lives in `server/index.ts` and deploys to the Neon project in `server/deployment.json`. Build its bundle with `npm run server:build`. For a local server, set `DATABASE_URL` and run `npm run server:dev`; point `REALTIME_URL` at `ws://localhost:3001/ws`. The HTTP synchronization path remains available for integration and fallback diagnostics.
 
 ## Check
 
@@ -48,4 +50,6 @@ Run the two-player integration test against the running game:
 npm run test:multiplayer
 ```
 
-Set `MULTIPLAYER_TEST_URL` to the full API endpoint to test another deployment. The optional WebSocket test runs with `npm run test:websocket`; `SECONDARY_TEST_URL` can point to a second WebSocket server process backed by the same database to test cross-process consistency. The integration test creates a temporary room and leaves it on completion; expired rooms are cleaned up by the server.
+Set `MULTIPLAYER_TEST_URL` to the full API endpoint to test another deployment. The two-player WebSocket test runs with `npm run test:websocket`; `SECONDARY_TEST_URL` can point to a second WebSocket server process backed by the same database to test cross-process consistency. The integration test creates a temporary room and leaves it on completion; expired rooms are cleaned up by the server.
+
+`npm run test:realtime` runs eight simultaneous live sockets, reports movement latency, verifies unarmed spawning and a weapon pickup, rejects a ninth player, and checks command idempotency. Use `MULTIPLAYER_TEST_URL` to choose the WebSocket service HTTP origin.

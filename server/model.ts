@@ -86,14 +86,15 @@ export function createMember(
     z: 50,
     yaw: 0,
     pitch: 0,
-    weapon: 0,
+    weapon: -1,
     health: 100,
     shield: 50,
     kills: 0,
     rank: 0,
     connected: true,
-    ammo: [30, 6, 5],
-    reserve: [120, 30, 20],
+    owned: [false, false, false],
+    ammo: [0, 0, 0],
+    reserve: [0, 0, 0],
     reloadUntil: 0,
     shotAt: 0,
     lastSeen: now,
@@ -148,8 +149,10 @@ export function advance(room: Room, now: number) {
   const dt = Math.max(0, (now - room.tickAt) / 1000);
   room.tickAt = now;
   for (const p of room.players) {
+    // Existing rooms finish with their previous loadout; new rounds start empty.
+    p.owned ??= p.ammo.map((n, i) => n > 0 || p.reserve[i] > 0);
     p.connected = now - p.lastSeen < 5000;
-    if (p.reloadUntil && now >= p.reloadUntil) {
+    if (p.weapon >= 0 && p.reloadUntil && now >= p.reloadUntil) {
       const r = reloadAmmo(
         p.ammo[p.weapon],
         p.reserve[p.weapon],
@@ -198,7 +201,7 @@ function validPose(p: unknown): p is PlayerPose {
       Number.isFinite(v[k as keyof PlayerPose]),
     ) &&
     Number.isInteger(v.weapon) &&
-    v.weapon >= 0 &&
+    v.weapon >= -1 &&
     v.weapon < 3
   );
 }
@@ -227,7 +230,7 @@ function move(p: Member, pose: PlayerPose, now: number) {
   p.y = Math.max(1.7, Math.min(3.05, pose.y));
   p.yaw = pose.yaw % (Math.PI * 2);
   p.pitch = Math.max(-1.35, Math.min(1.35, pose.pitch));
-  if (p.weapon !== pose.weapon) {
+  if (p.weapon !== pose.weapon && pose.weapon >= 0 && p.owned[pose.weapon]) {
     p.weapon = pose.weapon;
     p.reloadUntil = 0;
   }
@@ -250,6 +253,7 @@ function rayBox(origin: number[], dir: number[], min: number[], max: number[]) {
   return near;
 }
 function shoot(room: Room, p: Member, aiming: boolean, now: number) {
+  if (p.weapon < 0 || !p.owned[p.weapon]) return;
   const w = WEAPONS[p.weapon];
   if (
     p.reloadUntil ||
@@ -375,6 +379,8 @@ export function applyCommand(
   if (command.type === 'shoot') shoot(room, p, command.aiming, now);
   if (
     command.type === 'reload' &&
+    p.weapon >= 0 &&
+    p.owned[p.weapon] &&
     !p.reloadUntil &&
     p.ammo[p.weapon] < WEAPONS[p.weapon].capacity &&
     p.reserve[p.weapon] > 0
@@ -389,8 +395,15 @@ export function applyCommand(
       Math.hypot(l.x - p.x, l.z - p.z) > 3.8
     )
       return;
-    if (l.kind < 3) p.reserve[l.kind] += WEAPONS[l.kind].capacity * 2;
-    else if (l.kind === 3) p.shield = Math.min(100, p.shield + 50);
+    if (l.kind < 3) {
+      if (!p.owned[l.kind]) {
+        p.owned[l.kind] = true;
+        p.ammo[l.kind] = WEAPONS[l.kind].capacity;
+        p.weapon = l.kind;
+        p.reloadUntil = 0;
+      }
+      p.reserve[l.kind] += WEAPONS[l.kind].capacity * 2;
+    } else if (l.kind === 3) p.shield = Math.min(100, p.shield + 50);
     else p.health = Math.min(100, p.health + 45);
     room.loot[command.index] = true;
     event(room, { type: 'pickup', player: p.id, at: now });

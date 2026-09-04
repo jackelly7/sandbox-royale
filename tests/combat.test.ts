@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { BattleGame, type GameState } from '../lib/game/engine.ts';
+import { batchIsland } from '../lib/game/render-world.ts';
+import { weaponModel } from '../lib/game/weapon-models.ts';
 
 // Exercise Three.js geometry, raycasting, and match logic without a GPU or browser.
 function arena() {
@@ -46,6 +48,7 @@ function arena() {
       alive: 16,
       kills: 0,
       weapon: 2,
+      owned: [true, true, true],
       notice: '',
       hit: 0,
       bots: [],
@@ -109,6 +112,44 @@ void test('island spawn and supplies are accessible outside solid buildings', ()
     assert.equal(game.blocked(bot.mesh.position.x, bot.mesh.position.z), false);
   assert.ok(game.colliders.length > 25);
   game.disposeObject(game.scene);
+});
+void test('island batching removes most draw submissions without losing collision raycasts', () => {
+  const game = arena();
+  game.buildWorld();
+  const before = game.visible(
+    new THREE.Vector3(18, 2, 0),
+    new THREE.Vector3(18, 2, -40),
+  );
+  const stats = batchIsland(
+    game.world,
+    game.loot.map((l) => l.mesh),
+  );
+  assert.ok(stats.after < stats.before / 5, JSON.stringify(stats));
+  assert.equal(
+    game.visible(new THREE.Vector3(18, 2, 0), new THREE.Vector3(18, 2, -40)),
+    before,
+  );
+  assert.equal(before, false);
+  console.log(`Island static draw batches: ${stats.before} → ${stats.after}`);
+  game.disposeObject(game.world);
+});
+void test('AR, shotgun and sniper silhouettes differ and each uses one draw call', () => {
+  const sizes = [0, 1, 2].map((i) => {
+    const gun = weaponModel(i),
+      box = new THREE.Box3().setFromObject(gun);
+    assert.equal(gun.children.length, 1);
+    const size = box.getSize(new THREE.Vector3());
+    gun.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.geometry.dispose();
+    });
+    return size;
+  });
+  assert.ok(sizes[1].x > sizes[0].x, 'Shotgun has a wider pump and body');
+  assert.ok(sizes[2].z > sizes[1].z, 'Sniper has a longer barrel');
+  assert.ok(
+    sizes[2].y > sizes[0].y,
+    'Sniper scope gives it a taller silhouette',
+  );
 });
 
 void test('room forms stop GPU rendering while the animation loop stays resumable', (t) => {

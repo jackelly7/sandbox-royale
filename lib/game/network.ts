@@ -1,4 +1,4 @@
-import { MULTIPLAYER_URL } from './network-config.ts';
+import { MULTIPLAYER_URL, REALTIME_URL } from './network-config.ts';
 import type {
   Command,
   ConnectionStatus,
@@ -47,18 +47,112 @@ export class MultiplayerClient {
   timer: ReturnType<typeof setTimeout> | null = null;
   pending: { seq: number; command: Command }[] = [];
   pose: Command | null = null;
+  socket: WebSocket | null = null;
+  beat: ReturnType<typeof setInterval> | null = null;
+  lastServer = 0;
+  lastPing = 0;
+  socketReady = false;
+  transport: 'websocket' | 'http';
   constructor(
     session: RoomSession,
     onRoom: (room: RoomSnapshot, acknowledgedPose?: PlayerPose) => void,
     onStatus: (status: ConnectionStatus) => void,
     onError: (message: string) => void,
+    transport: 'websocket' | 'http' = 'websocket',
   ) {
     this.session = session;
     this.onRoom = onRoom;
     this.onStatus = onStatus;
     this.onError = onError;
+    this.transport = transport;
     this.onStatus('connecting');
-    void this.sync();
+    if (transport === 'websocket') this.connect();
+    else void this.sync();
+  }
+  connect() {
+    if (this.closed) return;
+    this.socketReady = false;
+    this.lastServer = Date.now();
+    const socket = (this.socket = new WebSocket(REALTIME_URL));
+    socket.onopen = () =>
+      socket.send(JSON.stringify({ type: 'auth', ...this.session }));
+    socket.onmessage = (event) => {
+      if (this.closed || this.socket !== socket) return;
+      this.lastServer = Date.now();
+      try {
+        const message = JSON.parse(event.data);
+        if (message.type === 'ready') {
+          this.socketReady = true;
+          this.flush();
+        }
+        if (message.type === 'error') this.onError(message.message);
+        if (message.type === 'snapshot') {
+          this.retry = 0;
+          this.receivedRoom = true;
+          const acknowledged = [...this.sentPoses.entries()]
+            .filter(([seq]) => seq <= message.ack)
+            .sort((a, b) => b[0] - a[0]);
+          for (const [seq] of acknowledged) this.sentPoses.delete(seq);
+          this.pending = this.pending.filter((a) => a.seq > message.ack);
+          this.onStatus('connected');
+          this.onRoom(message.room, acknowledged[0]?.[1]);
+        }
+      } catch {
+        this.onError('Could not read the match update.');
+      }
+    };
+    socket.onerror = () => socket.close();
+    socket.onclose = () => {
+      if (this.beat) clearInterval(this.beat);
+      this.beat = null;
+      this.socketReady = false;
+      if (this.closed) return;
+      this.retry++;
+      if (!this.receivedRoom && this.retry >= 3) {
+        this.onError(
+          'The live connection could not open. Leave the room and try again.',
+        );
+        this.close();
+        return;
+      }
+      this.onStatus('reconnecting');
+      this.timer = setTimeout(
+        () => this.connect(),
+        Math.min(250 * 2 ** this.retry, 3000),
+      );
+    };
+    this.beat = setInterval(() => {
+      if (Date.now() - this.lastServer > 8000) {
+        socket.close();
+        return;
+      }
+      this.flush();
+      if (this.socketReady && Date.now() - this.lastPing > 1000) {
+        this.lastPing = Date.now();
+        socket.send(JSON.stringify({ type: 'ping', at: this.lastPing }));
+      }
+    }, 50);
+  }
+  flush() {
+    if (
+      !this.socketReady ||
+      this.socket?.readyState !== 1 ||
+      this.socket.bufferedAmount > 64000
+    )
+      return;
+    if (this.pose) {
+      this.pending = this.pending.filter((a) => a.command.type !== 'pose');
+      this.pending.push({ seq: ++this.sequence, command: this.pose });
+      this.pose = null;
+    }
+    if (!this.pending.length) return;
+    const actions = this.pending.slice(0, 24);
+    for (const action of actions)
+      if (action.command.type === 'pose' || action.command.type === 'shoot')
+        this.sentPoses.set(action.seq, action.command.pose);
+    while (this.sentPoses.size > 256)
+      this.sentPoses.delete(this.sentPoses.keys().next().value!);
+    this.socket.send(JSON.stringify({ type: 'commands', actions }));
   }
   static async enter(name: string, code?: string) {
     const { response, data: value } = await requestRoom(
@@ -164,6 +258,10 @@ export class MultiplayerClient {
         this.pose = null;
       }
       this.pending.push({ seq: ++this.sequence, command });
+      if (this.transport === 'websocket') {
+        this.flush();
+        return;
+      }
       if (this.timer) {
         clearTimeout(this.timer);
         this.timer = null;
@@ -175,6 +273,22 @@ export class MultiplayerClient {
     if (this.closed) return;
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
+    if (this.beat) clearInterval(this.beat);
+    if (this.socket?.readyState === 1 && this.socketReady) {
+      if (leave)
+        this.socket.send(
+          JSON.stringify({
+            type: 'commands',
+            actions: [{ seq: ++this.sequence, command: { type: 'leave' } }],
+          }),
+        );
+      // Allow the server to apply leave and close the socket itself.
+      const socket = this.socket;
+      setTimeout(() => socket.close(), 500);
+      this.onStatus('offline');
+      return;
+    }
+    this.socket?.close();
     if (leave)
       void fetch(MULTIPLAYER_URL, {
         method: 'POST',

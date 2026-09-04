@@ -27,6 +27,43 @@ function started() {
   advance(room, at + 5001);
   return room;
 }
+void test('players land unarmed and cannot fire or equip an uncollected weapon', () => {
+  const room = started(),
+    [p, q] = room.players;
+  assert.equal(p.weapon, -1);
+  assert.deepEqual(p.owned, [false, false, false]);
+  assert.deepEqual(p.ammo, [0, 0, 0]);
+  applyCommand(
+    room,
+    p.id,
+    { type: 'shoot', pose: { ...p, weapon: 2 }, aiming: true },
+    at + 5100,
+  );
+  applyCommand(room, p.id, { type: 'reload' }, at + 5200);
+  assert.equal(p.weapon, -1);
+  assert.equal(q.health, 100);
+  assert.equal(room.events.length, 0);
+});
+void test('all three gun drops unlock, equip and load a distinct weapon', () => {
+  const room = started(),
+    p = room.players[0];
+  for (let kind = 0; kind < 3; kind++) {
+    const index = MAP.loot.findIndex((l) => l.kind === kind);
+    Object.assign(p, { x: MAP.loot[index].x, z: MAP.loot[index].z });
+    applyCommand(room, p.id, { type: 'pickup', index }, at + 5100 + kind * 100);
+    assert.equal(p.weapon, kind);
+    assert.equal(p.owned[kind], true);
+    assert.ok(p.ammo[kind] > 0);
+    // A movement packet sent before pickup must not unequip the new weapon.
+    applyCommand(
+      room,
+      p.id,
+      { type: 'pose', pose: { ...p, weapon: -1 } },
+      at + 5150 + kind * 100,
+    );
+    assert.equal(p.weapon, kind);
+  }
+});
 void test('host starts one shared countdown and all players spawn clear of cover', () => {
   const room = waiting();
   assert.throws(
@@ -83,7 +120,16 @@ void test('server rejects teleports and malformed movement', () => {
 void test('server enforces weapon cooldown and resolves one winner for everyone', () => {
   const room = started(),
     [p, target] = room.players;
-  Object.assign(p, { x: 0, y: 1.7, z: 15, yaw: 0, pitch: 0, weapon: 0 });
+  Object.assign(p, {
+    x: 0,
+    y: 1.7,
+    z: 15,
+    yaw: 0,
+    pitch: 0,
+    weapon: 0,
+    owned: [true, false, false],
+    ammo: [30, 0, 0],
+  });
   Object.assign(target, { x: 0, y: 1.7, z: 5 });
   const shoot = (t: number) =>
     applyCommand(room, p.id, { type: 'shoot', pose: p, aiming: true }, t);
@@ -102,7 +148,16 @@ void test('server enforces weapon cooldown and resolves one winner for everyone'
 void test('server does not allow bullets through island buildings', () => {
   const room = started(),
     [p, target] = room.players;
-  Object.assign(p, { x: 18, y: 1.7, z: 0, yaw: 0, pitch: 0, weapon: 2 });
+  Object.assign(p, {
+    x: 18,
+    y: 1.7,
+    z: 0,
+    yaw: 0,
+    pitch: 0,
+    weapon: 2,
+    owned: [false, false, true],
+    ammo: [0, 0, 5],
+  });
   Object.assign(target, { x: 18, y: 1.7, z: -40 });
   applyCommand(room, p.id, { type: 'shoot', pose: p, aiming: true }, at + 5100);
   assert.equal(target.health, 100);
@@ -116,8 +171,12 @@ void test('shared loot can only be collected once', () => {
   applyCommand(room, p.id, { type: 'pickup', index: 0 }, at + 5100);
   applyCommand(room, q.id, { type: 'pickup', index: 0 }, at + 5101);
   assert.equal(room.loot[0], true);
-  assert.equal(p.reserve[0], 180);
-  assert.equal(q.reserve[0], 120);
+  assert.equal(p.reserve[0], 60);
+  assert.equal(p.owned[0], true);
+  assert.equal(p.ammo[0], 30);
+  assert.equal(p.weapon, 0);
+  assert.equal(q.reserve[0], 0);
+  assert.equal(q.owned[0], false);
 });
 void test('disconnect grace allows recovery and eventually resolves a match', () => {
   const room = started();
@@ -147,5 +206,13 @@ void test('rematch requires the host and resets ammo, loot, and the round', () =
   applyCommand(room, 'host', { type: 'start' }, at + 5300);
   assert.equal(room.round, 2);
   assert.ok(room.loot.every((used) => !used));
-  assert.ok(room.players.every((p) => p.health === 100 && p.ammo[0] === 30));
+  assert.ok(
+    room.players.every(
+      (p) =>
+        p.health === 100 &&
+        p.ammo[0] === 0 &&
+        p.weapon === -1 &&
+        p.owned.every((has) => !has),
+    ),
+  );
 });

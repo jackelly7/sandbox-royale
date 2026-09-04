@@ -127,8 +127,8 @@ export function FriendsRoom({
           </p>
         )}
         <p className="touch-help">
-          2–8 friends. Everyone starts with all three weapons. The host starts
-          the match when everyone has joined.
+          2–8 friends. Land unarmed. Collect an AR, shotgun, or sniper. The host
+          starts the match when everyone has joined.
         </p>
       </div>
     );

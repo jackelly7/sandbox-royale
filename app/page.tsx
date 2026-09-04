@@ -50,9 +50,10 @@ const initial: GameState = {
   shield: 50,
   alive: 16,
   kills: 0,
-  ammo: 30,
-  reserve: 120,
-  weapon: 0,
+  ammo: 0,
+  reserve: 0,
+  weapon: -1,
+  owned: [false, false, false],
   elapsed: 0,
   storm: 107,
   outside: false,
@@ -76,7 +77,7 @@ const controls = [
   ['SPACE', 'Jump'],
   ['R', 'Reload'],
   ['E', 'Collect supplies'],
-  ['1  2  3', 'Switch weapon'],
+  ['1  2  3 / WHEEL', 'Switch collected weapons'],
   ['ESC', 'Pause'],
 ];
 
@@ -228,6 +229,7 @@ export default function Home() {
     [roomError, setRoomError] = useState(''),
     [inviteCode, setInviteCode] = useState('');
   const roomPhase = useRef('waiting');
+  const roomUIAt = useRef(0);
   useEffect(() => {
     game.current?.setMenuOpen(panel !== null);
   }, [panel, ready]);
@@ -251,7 +253,13 @@ export default function Home() {
       client.current = new MultiplayerClient(
         joined,
         (next, acknowledgedPose) => {
-          setRoom(next);
+          if (
+            next.phase !== roomPhase.current ||
+            Date.now() - roomUIAt.current > 250
+          ) {
+            setRoom(next);
+            roomUIAt.current = Date.now();
+          }
           game.current?.applyNetworkSnapshot(next, acknowledgedPose);
           if (next.phase === 'countdown' && roomPhase.current !== 'countdown')
             setPanel(null);
@@ -623,33 +631,48 @@ export default function Home() {
                 <b>{Math.ceil(state.health)}</b>
               </div>
               <div className="player-label">
-                YOU <span>SOLO</span>
+                YOU <span>{session ? 'BATTLE ROYALE' : 'SOLO'}</span>
               </div>
             </div>
             <div className="weapon-slots">
               {WEAPONS.map((w, i) => (
                 <button
                   key={w.name}
-                  className={`weapon-slot ${state.weapon === i ? 'selected' : ''}`}
+                  className={`weapon-slot ${state.weapon === i ? 'selected' : ''} ${!state.owned[i] ? 'unowned' : ''}`}
+                  disabled={!state.owned[i]}
+                  aria-label={`${i + 1} ${w.name}${!state.owned[i] ? ', find this weapon' : ''}`}
                   style={{ '--weapon-color': w.color } as React.CSSProperties}
                   onClick={() => game.current?.selectWeapon(i)}
                 >
                   <kbd>{i + 1}</kbd>
                   <Crosshair size={22} />
-                  <span>{w.name}</span>
+                  <span>
+                    {w.short}
+                    <small>{state.owned[i] ? 'READY' : 'FIND'}</small>
+                  </span>
                 </button>
               ))}
             </div>
             <div className="ammo-block">
               <span>
-                {state.reloading ? 'RELOADING' : WEAPONS[state.weapon].short}
+                {state.reloading
+                  ? 'RELOADING'
+                  : (WEAPONS[state.weapon]?.short ?? 'UNARMED')}
               </span>
               <div>
-                <b>{String(state.ammo).padStart(2, '0')}</b>
+                <b>
+                  {state.weapon < 0 ? '—' : String(state.ammo).padStart(2, '0')}
+                </b>
                 <span>/ {state.reserve}</span>
               </div>
               <small>
-                <kbd>R</kbd> RELOAD
+                {state.weapon < 0 ? (
+                  'FIND A WEAPON DROP'
+                ) : (
+                  <>
+                    <kbd>R</kbd> RELOAD · 1–3 / WHEEL
+                  </>
+                )}
               </small>
             </div>
           </div>
@@ -897,8 +920,9 @@ export default function Home() {
               <div className="help-note">
                 <Shield size={21} />
                 <p>
-                  All three weapons are ready at drop. Walk up to glowing
-                  supplies and press E for ammo, health, or shields.
+                  You land unarmed. Find an AR, shotgun, or sniper at a glowing
+                  drop and press E to collect it. Use 1–3 or the scroll wheel to
+                  switch between weapons you have collected.
                 </p>
               </div>
               <p className="touch-help">

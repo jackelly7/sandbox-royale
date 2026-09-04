@@ -17,10 +17,14 @@ export type SocketLike = {
     listener: (event: { data?: unknown }) => void,
   ) => void;
 };
-const clients = new Map<
-  SocketLike,
-  { code: string; id: string; lastMessage: number }
->();
+type Session = {
+  code: string;
+  id: string;
+  lastMessage: number;
+  actions: Map<number, ReturnType<typeof parseCommand>>;
+  legacySequence: number;
+};
+const clients = new Map<SocketLike, Session>();
 const origins = new Set([
   'https://lastlight-battle-royale.jack794585.chatgpt.site',
   'http://localhost:3000',
@@ -32,90 +36,27 @@ export function allowedOrigin(request: Request) {
   return !origin || origins.has(origin);
 }
 function send(socket: SocketLike, data: unknown) {
-  if (socket.readyState === 1 && socket.bufferedAmount < 256000)
+  if (socket.readyState === 1 && socket.bufferedAmount < 128000)
     socket.send(JSON.stringify(data));
 }
 export function attachSocket(socket: SocketLike) {
-  let authenticated = false,
-    closed = false,
-    working = false,
-    lastPose: unknown = null;
-  const queue: unknown[] = [];
+  let authenticating = false;
   let count = 0,
     windowAt = Date.now();
   const timeout = setTimeout(() => {
-    if (!authenticated) socket.close(4001, 'Authentication required');
-  }, 5000);
+    if (!clients.has(socket)) socket.close(4001, 'Authentication required');
+  }, 8000);
   socket.addEventListener('close', () => {
-    closed = true;
     clearTimeout(timeout);
     clients.delete(socket);
   });
-  socket.addEventListener('error', () => {
-    socket.close();
-  });
-  const drain = async () => {
-    if (working || closed) return;
-    working = true;
-    try {
-      while (!closed && (queue.length || lastPose)) {
-        const data = queue.length ? queue.shift() : lastPose;
-        if (!queue.length && data === lastPose) lastPose = null;
-        if (!authenticated) {
-          const auth = data as {
-            type?: string;
-            code?: string;
-            playerId?: string;
-            token?: string;
-          };
-          if (
-            auth?.type !== 'auth' ||
-            typeof auth.code !== 'string' ||
-            typeof auth.playerId !== 'string' ||
-            typeof auth.token !== 'string'
-          )
-            throw new GameError('Authentication required.', 401);
-          await authorize(auth.code, auth.playerId, auth.token);
-          authenticated = true;
-          clearTimeout(timeout);
-          clients.set(socket, {
-            code: auth.code,
-            id: auth.playerId,
-            lastMessage: Date.now(),
-          });
-          send(socket, { type: 'ready' });
-          continue;
-        }
-        const session = clients.get(socket);
-        if (!session) return;
-        session.lastMessage = Date.now();
-        const command = parseCommand(data);
-        await transact(session.code, (room) =>
-          applyCommand(room, session.id, command, Date.now()),
-        );
-        if (command.type === 'leave') {
-          send(socket, { type: 'left' });
-          socket.close(1000, 'Left room');
-        }
-      }
-    } catch (error) {
-      const err =
-        error instanceof GameError
-          ? error
-          : new GameError('Connection interrupted. Reconnecting...', 503);
-      send(socket, { type: 'error', message: err.message, status: err.status });
-      if (err.status === 401 || err.status === 404 || err.status >= 500)
-        socket.close(4001, err.message.slice(0, 100));
-    } finally {
-      working = false;
-    }
-  };
-  socket.addEventListener('message', (event) => {
-    if (typeof event.data !== 'string' || event.data.length > 4096) {
+  socket.addEventListener('error', () => socket.close());
+  socket.addEventListener('message', (message) => {
+    if (typeof message.data !== 'string' || message.data.length > 16000) {
       socket.close(4002, 'Invalid message');
       return;
     }
-    if (Date.now() - windowAt > 1000) {
+    if (Date.now() - windowAt >= 1000) {
       count = 0;
       windowAt = Date.now();
     }
@@ -124,57 +65,138 @@ export function attachSocket(socket: SocketLike) {
       return;
     }
     try {
-      const data = JSON.parse(event.data) as { type?: string };
-      if (authenticated && data.type === 'pose') lastPose = data;
-      else {
-        if (queue.length > 16) {
-          socket.close(4008, 'Too many commands');
-          return;
-        }
-        queue.push(data);
+      const data = JSON.parse(message.data);
+      const session = clients.get(socket);
+      if (!session) {
+        if (authenticating) return;
+        if (
+          data.type !== 'auth' ||
+          typeof data.code !== 'string' ||
+          typeof data.playerId !== 'string' ||
+          typeof data.token !== 'string'
+        )
+          throw new GameError('Authentication required.', 401);
+        authenticating = true;
+        void authorize(data.code, data.playerId, data.token)
+          .then(() => {
+            if (socket.readyState !== 1) return;
+            clearTimeout(timeout);
+            clients.set(socket, {
+              code: data.code,
+              id: data.playerId,
+              lastMessage: Date.now(),
+              actions: new Map(),
+              legacySequence: 0,
+            });
+            send(socket, { type: 'ready' });
+          })
+          .catch(() => socket.close(4001, 'Room session unavailable'));
+        return;
       }
-      void drain();
-    } catch {
-      socket.close(4002, 'Invalid JSON');
+      session.lastMessage = Date.now();
+      if (data.type === 'ping') {
+        send(socket, { type: 'pong', at: data.at });
+        return;
+      }
+      const actions =
+        data.type === 'commands' && Array.isArray(data.actions)
+          ? data.actions.slice(0, 24)
+          : [{ seq: ++session.legacySequence, command: data }];
+      for (const action of actions) {
+        if (!Number.isSafeInteger(action.seq) || action.seq < 1)
+          throw new GameError('Invalid command sequence');
+        session.actions.set(action.seq, parseCommand(action.command));
+      }
+      if (session.actions.size > 96)
+        socket.close(4008, 'Too many queued commands');
+    } catch (error) {
+      send(socket, {
+        type: 'error',
+        message: error instanceof Error ? error.message : 'Invalid message',
+      });
     }
   });
 }
-let polling = false;
+// One local room batch per tick, shared under a Postgres row lock. Concurrent
+// isolates see the same authoritative match, without a database trip per input.
+const working = new Set<string>();
 const poll = setInterval(() => {
-  if (polling || clients.size === 0) return;
-  polling = true;
-  const codes = [...new Set([...clients.values()].map((s) => s.code))];
-  void Promise.all(
-    codes.map(async (code) => {
-      try {
-        const state = await transact(code, (room) => {
-          advance(room, Date.now());
-          return snapshot(room, Date.now());
-        });
-        for (const [socket, session] of clients)
-          if (session.code === code) {
-            if (Date.now() - session.lastMessage > 15000) {
-              socket.close(4000, 'Heartbeat timeout');
-              continue;
-            }
-            send(socket, { type: 'snapshot', room: state });
-          }
-      } catch (error) {
-        for (const [socket, session] of clients)
-          if (session.code === code) {
-            send(socket, {
-              type: 'error',
-              message:
-                error instanceof Error ? error.message : 'Room unavailable.',
-            });
-            socket.close(4004, 'Room unavailable');
-          }
+  const codes = new Set([...clients.values()].map((s) => s.code));
+  for (const code of codes) {
+    if (working.has(code)) continue;
+    working.add(code);
+    const batch = [...clients.entries()]
+      .filter(([, s]) => s.code === code)
+      .map(([socket, session]) => ({
+        socket,
+        session,
+        actions: [...session.actions.entries()].sort((a, b) => a[0] - b[0]),
+      }));
+    void transact(code, (room) => {
+      const now = Date.now();
+      const errors = new Map<string, { message: string; status: number }>();
+      for (const { session } of batch) {
+        const p = room.players.find((p) => p.id === session.id);
+        if (p && p.lastSeen !== 0)
+          p.lastSeen = Math.max(p.lastSeen, session.lastMessage);
       }
-    }),
-  ).finally(() => {
-    polling = false;
-  });
-}, 100);
+      for (const { session, actions } of batch) {
+        for (const [seq, command] of actions) {
+          const p = room.players.find((p) => p.id === session.id);
+          if (!p || p.lastSeen === 0 || seq <= p.lastCommand) continue;
+          try {
+            applyCommand(room, p.id, command, now);
+          } catch (e) {
+            errors.set(p.id, {
+              message: e instanceof Error ? e.message : 'Invalid command',
+              status: e instanceof GameError ? e.status : 400,
+            });
+          }
+          p.lastCommand = seq;
+        }
+      }
+      advance(room, now);
+      return {
+        room: snapshot(room, now),
+        acks: new Map(room.players.map((p) => [p.id, p.lastCommand])),
+        errors,
+      };
+    })
+      .then((result) => {
+        for (const { socket, session, actions } of batch) {
+          for (const [seq] of actions) session.actions.delete(seq);
+          if (Date.now() - session.lastMessage > 15000) {
+            socket.close(4000, 'Heartbeat timeout');
+            continue;
+          }
+          const error = result.errors.get(session.id);
+          if (error) send(socket, { type: 'error', ...error });
+          send(socket, {
+            type: 'snapshot',
+            room: result.room,
+            ack:
+              result.acks.get(session.id) ??
+              Math.max(0, ...actions.map((a) => a[0])),
+          });
+          if (actions.some(([, command]) => command.type === 'leave'))
+            socket.close(1000, 'Left room');
+        }
+      })
+      .catch((error) => {
+        for (const { socket } of batch) {
+          send(socket, {
+            type: 'error',
+            message:
+              error instanceof GameError
+                ? error.message
+                : 'Connection interrupted. Reconnecting...',
+          });
+          socket.close(4004, 'Room unavailable');
+        }
+      })
+      .finally(() => working.delete(code));
+  }
+}, 50);
 poll.unref?.();
 const cleanup = setInterval(() => {
   if (!clients.size) return;

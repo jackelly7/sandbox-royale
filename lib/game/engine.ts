@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { weaponModel } from './weapon-models.ts';
+import { batchIsland } from './render-world.ts';
 import type { Command, RoomSnapshot, PlayerPose } from './multiplayer.ts';
 import {
   BOT_COUNT,
@@ -6,6 +8,7 @@ import {
   stormRadius,
   takeDamage,
   reloadAmmo,
+  cycleWeapon,
 } from './rules.ts';
 
 export type GameState = {
@@ -17,6 +20,7 @@ export type GameState = {
   ammo: number;
   reserve: number;
   weapon: number;
+  owned: boolean[];
   elapsed: number;
   storm: number;
   outside: boolean;
@@ -38,6 +42,8 @@ type Bot = {
   turn: number;
   seed: number;
   name: string;
+  tag?: THREE.Sprite;
+  armed: boolean;
 };
 type Loot = { mesh: THREE.Group; kind: number; used: boolean };
 export const landmarks = [
@@ -71,9 +77,10 @@ export class BattleGame {
     shield: 50,
     alive: 16,
     kills: 0,
-    ammo: 30,
-    reserve: 120,
-    weapon: 0,
+    ammo: 0,
+    reserve: 0,
+    weapon: -1,
+    owned: [false, false, false],
     elapsed: 0,
     storm: 107,
     outside: false,
@@ -105,8 +112,16 @@ export class BattleGame {
   yaw = 0;
   pitch = 0;
   velocityY = 0;
-  weaponAmmo = [30, 6, 5];
-  reserveAmmo = [120, 30, 20];
+  weaponAmmo = [0, 0, 0];
+  reserveAmmo = [0, 0, 0];
+  gunModels: THREE.Group[] = [];
+  wheelAt = 0;
+  correction = new THREE.Vector3();
+  renderStats = { before: 0, after: 0 };
+  framesRendered = 0;
+  measuredAt = 0;
+  resolutionScale = 1;
+  slowSamples = 0;
   shooting = false;
   aiming = false;
   cooldown = 0;
@@ -143,7 +158,7 @@ export class BattleGame {
       antialias: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.enabled = false;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -169,6 +184,11 @@ export class BattleGame {
     sun.shadow.bias = -0.0008;
     this.scene.add(sun);
     this.buildWorld();
+    this.renderStats = batchIsland(
+      this.world,
+      this.loot.map((l) => l.mesh),
+    );
+    this.world.updateMatrixWorld(true);
     this.buildGun();
     this.resetBots();
     this.bind();
@@ -511,16 +531,44 @@ export class BattleGame {
       [70, -48],
       [-60, -57],
     ];
+    // Each of the eight spawn sectors has three nearby weapon choices.
+    for (let sector = 0; sector < 8; sector++) {
+      const angle = (sector / 8) * Math.PI * 2;
+      for (let kind = 0; kind < 3; kind++) {
+        points.push([
+          Math.sin(angle) * 62 + Math.cos(angle) * (5 + kind * 3),
+          Math.cos(angle) * 62 - Math.sin(angle) * (5 + kind * 3),
+        ]);
+      }
+    }
     points.forEach(([x, z], i) => {
-      const kind = i % 5;
-      const colors = ['#85e2bc', '#9cb8ff', '#cf9cf4', '#78dfee', '#ffc377'];
+      const kind = i < 19 ? i % 5 : (i - 19) % 3;
+      const colors = ['#85e2bc', '#ffc06a', '#cf9cf4', '#78dfee', '#ffc377'];
       const group = new THREE.Group();
-      const box = this.box(1.2, 0.75, 0.85, colors[kind], 0, 0.65, 0, group);
-      (box.material as THREE.MeshStandardMaterial).emissive = new THREE.Color(
-        colors[kind],
+      if (kind < 3) {
+        const model = weaponModel(kind);
+        model.scale.setScalar(1.7);
+        model.rotation.z = -0.15;
+        model.position.y = 0.95;
+        group.add(model);
+      } else {
+        const item = new THREE.Group();
+        this.box(0.7, 0.8, 0.5, colors[kind], 0, 0, 0, item);
+        this.box(kind === 4 ? 0.5 : 0.73, 0.13, 0.53, '#fff8de', 0, 0, 0, item);
+        if (kind === 4) this.box(0.13, 0.5, 0.53, '#fff8de', 0, 0, 0, item);
+        item.position.y = 0.85;
+        group.add(item);
+      }
+      const ring = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.9, 0.9, 0.05, 20),
+        new THREE.MeshBasicMaterial({
+          color: colors[kind],
+          transparent: true,
+          opacity: 0.35,
+        }),
       );
-      (box.material as THREE.MeshStandardMaterial).emissiveIntensity = 0.15;
-      this.box(1.23, 0.15, 0.88, '#f6f4d9', 0, 0.66, 0, group);
+      ring.position.y = 0.07;
+      group.add(ring);
       const beam = new THREE.Mesh(
         new THREE.CylinderGeometry(0.11, 0.5, 5, 6, 1, true),
         new THREE.MeshBasicMaterial({
@@ -539,36 +587,59 @@ export class BattleGame {
   }
   buildGun() {
     this.camera.add(this.gun);
-    this.box(0.15, 0.16, 0.64, '#2d4147', 0, 0, 0, this.gun);
-    this.box(0.19, 0.08, 0.34, '#62847c', 0, 0.105, -0.04, this.gun);
-    this.box(0.07, 0.07, 0.48, '#25373c', 0, 0.025, -0.5, this.gun);
-    this.box(0.11, 0.24, 0.12, '#202f36', 0, -0.14, 0.06, this.gun).rotation.x =
-      -0.2;
-    this.box(0.14, 0.21, 0.16, '#769081', 0, -0.1, -0.2, this.gun).rotation.x =
-      0.25;
-    this.box(0.055, 0.06, 0.04, '#141f28', 0, 0.16, -0.25, this.gun);
-    this.box(0.2, 0.16, 0.24, '#d3a579', 0.08, -0.13, 0.25, this.gun);
-    this.box(0.18, 0.15, 0.28, '#356b68', 0.09, -0.15, 0.44, this.gun);
-    this.box(0.17, 0.15, 0.24, '#d3a579', -0.035, -0.12, -0.25, this.gun);
-    this.box(
-      0.15,
-      0.15,
-      0.29,
-      '#356b68',
-      -0.13,
-      -0.2,
-      -0.14,
-      this.gun,
-    ).rotation.z = -0.5;
+    this.gunModels = WEAPONS.map((_, i) => {
+      const model = weaponModel(i);
+      model.visible = false;
+      this.gun.add(model);
+      return model;
+    });
     this.flash = new THREE.Mesh(
       new THREE.ConeGeometry(0.08, 0.28, 5),
       new THREE.MeshBasicMaterial({ color: '#ffe69c' }),
     );
     this.flash.rotation.x = -Math.PI / 2;
-    this.flash.position.set(0, 0.025, -0.85);
     this.flash.visible = false;
     this.gun.add(this.flash);
     this.gun.visible = false;
+  }
+  showWeapon() {
+    const index = this.state.weapon;
+    this.gun.visible = index >= 0 && this.state.owned[index];
+    this.gunModels?.forEach((model, i) => {
+      model.visible = i === index;
+    });
+    this.flash.position.set(
+      0,
+      0.025,
+      index === 2 ? -1.12 : index === 1 ? -0.85 : -0.74,
+    );
+  }
+  nameTag(name: string) {
+    if (typeof document === 'undefined') return undefined;
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 96;
+    const context = canvas.getContext('2d');
+    if (!context) return undefined;
+    context.fillStyle = '#102b34dd';
+    context.fillRect(0, 0, 512, 96);
+    context.fillStyle = '#fff8de';
+    context.font = 'bold 42px sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(name, 256, 48, 484);
+    const material = new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(canvas),
+      depthTest: true,
+      depthWrite: false,
+      sizeAttenuation: false,
+    });
+    const sprite = new THREE.Sprite(material);
+    sprite.raycast = () => {};
+    sprite.name = 'Gamertag: ' + name;
+    sprite.position.set(0, 2.8, 0);
+    sprite.scale.set(0.23, 0.043, 1);
+    return sprite;
   }
   resetBots(count = BOT_COUNT) {
     for (const b of this.bots) {
@@ -587,7 +658,16 @@ export class BattleGame {
         this.box(0.24, 0.77, 0.26, '#3c5556', s * 0.22, 0.4, 0, g);
         this.box(0.24, 0.65, 0.26, color, s * 0.49, 1.29, 0.1, g);
       }
-      this.box(0.15, 0.17, 0.8, '#273f43', 0.32, 1.32, 0.43, g);
+      const held = weaponModel(i % 3);
+      held.name = 'Bot weapon';
+      held.userData.weapon = i % 3;
+      held.scale.setScalar(0.8);
+      held.rotation.y = Math.PI;
+      held.position.set(0.35, 1.35, 0.25);
+      held.visible = false;
+      g.add(held);
+      const tag = this.nameTag(names[i] ?? 'Player');
+      if (tag) g.add(tag);
       const a = (i / count) * Math.PI * 2,
         r = 48 + (i % 4) * 11;
       g.position.copy(this.safePosition(Math.sin(a) * r, Math.cos(a) * r));
@@ -603,6 +683,8 @@ export class BattleGame {
         turn: 0,
         seed: i * 0.7,
         name: names[i],
+        tag,
+        armed: false,
       });
     }
   }
@@ -631,6 +713,16 @@ export class BattleGame {
         this.selectWeapon(Number(e.code.slice(-1)) - 1);
       if (e.code === 'Space' && this.position.y <= 1.71) this.velocityY = 7;
       if (e.code === 'Escape') this.pause();
+    }) as EventListener);
+    on(this.renderer.domElement, 'wheel', ((e: WheelEvent) => {
+      if (this.state.phase !== 'playing' || this.menuOpen) return;
+      e.preventDefault();
+      if (Math.abs(e.deltaY) < 1 || performance.now() - this.wheelAt < 140)
+        return;
+      this.wheelAt = performance.now();
+      this.selectWeapon(
+        cycleWeapon(this.state.weapon, this.state.owned, e.deltaY),
+      );
     }) as EventListener);
     on(document, 'keyup', ((e: KeyboardEvent) => {
       this.keys.delete(e.code);
@@ -683,7 +775,7 @@ export class BattleGame {
         window.devicePixelRatio,
         1.5,
         Math.sqrt((1920 * 1080) / Math.max(1, w * h)),
-      ),
+      ) * this.resolutionScale,
     );
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
@@ -701,13 +793,14 @@ export class BattleGame {
         shield: 50,
         alive: 16,
         kills: 0,
-        ammo: 30,
-        reserve: 120,
-        weapon: 0,
+        ammo: 0,
+        reserve: 0,
+        weapon: -1,
+        owned: [false, false, false],
         elapsed: 0,
         storm: 107,
         rank: 16,
-        notice: 'Stay inside the storm. Be the last one standing.',
+        notice: 'Find a weapon drop. Press E to collect it.',
         hit: 0,
         hurt: 0,
         pickup: '',
@@ -718,8 +811,8 @@ export class BattleGame {
       this.yaw = 0;
       this.pitch = 0;
       this.velocityY = 0;
-      this.weaponAmmo = [30, 6, 5];
-      this.reserveAmmo = [120, 30, 20];
+      this.weaponAmmo = [0, 0, 0];
+      this.reserveAmmo = [0, 0, 0];
       this.reloadTimer = 0;
       this.cooldown = 0.3;
       this.resetBots();
@@ -729,7 +822,7 @@ export class BattleGame {
     }
     this.touch = touch;
     this.state.phase = 'playing';
-    this.gun.visible = true;
+    this.showWeapon();
     this.storm.visible = true;
     if (!this.audio) {
       try {
@@ -771,8 +864,9 @@ export class BattleGame {
     this.emit();
   }
   selectWeapon(index: number) {
-    if (index < 0 || index > 2) return;
+    if (index < 0 || index > 2 || !this.state.owned[index]) return;
     this.state.weapon = index;
+    this.showWeapon();
     this.network?.send({ type: 'pose', pose: this.pose() });
     this.reloadTimer = 0;
     this.state.reloading = false;
@@ -780,6 +874,7 @@ export class BattleGame {
     this.emit();
   }
   reload() {
+    if (this.state.weapon < 0 || !this.state.owned[this.state.weapon]) return;
     const i = this.state.weapon,
       w = WEAPONS[i];
     if (
@@ -808,9 +903,14 @@ export class BattleGame {
       return;
     }
     if (l.kind < 3) {
+      const first = !this.state.owned[l.kind];
+      this.state.owned[l.kind] = true;
+      if (first) this.weaponAmmo[l.kind] = WEAPONS[l.kind].capacity;
       this.reserveAmmo[l.kind] += WEAPONS[l.kind].capacity * 2;
-      this.selectWeapon(l.kind);
-      this.notice(`${WEAPONS[l.kind].name} ammunition collected`);
+      if (first) this.selectWeapon(l.kind);
+      this.notice(
+        `${WEAPONS[l.kind].name} ${first ? 'collected' : 'ammo collected'}`,
+      );
     }
     if (l.kind === 3) {
       this.state.shield = Math.min(100, this.state.shield + 50);
@@ -855,6 +955,7 @@ export class BattleGame {
     osc.stop(this.audio.currentTime + duration);
   }
   shoot() {
+    if (this.state.weapon < 0 || !this.state.owned[this.state.weapon]) return;
     const i = this.state.weapon,
       w = WEAPONS[i];
     if (this.network && this.networkRoom?.phase !== 'playing') return;
@@ -995,12 +1096,52 @@ export class BattleGame {
         distance = p.distanceTo(this.position);
       b.cooldown -= dt;
       const safe = Math.hypot(p.x, p.z) < this.state.storm - 5;
+      if (!b.armed) {
+        const supply = this.loot
+          .filter((l) => !l.used && l.kind < 3)
+          .sort(
+            (a, c) =>
+              a.mesh.position.distanceToSquared(p) -
+              c.mesh.position.distanceToSquared(p),
+          )[0];
+        if (supply) {
+          if (supply.mesh.position.distanceTo(p) < 2.8) {
+            b.armed = true;
+            supply.used = true;
+            supply.mesh.visible = false;
+            const oldGun = b.mesh.getObjectByName('Bot weapon');
+            if (oldGun) {
+              oldGun.removeFromParent();
+              this.disposeObject(oldGun);
+            }
+            const held = weaponModel(supply.kind);
+            held.name = 'Bot weapon';
+            held.scale.setScalar(0.8);
+            held.rotation.y = Math.PI;
+            held.position.set(0.35, 1.35, 0.25);
+            b.mesh.add(held);
+          } else {
+            const direction = Math.atan2(
+              supply.mesh.position.x - p.x,
+              supply.mesh.position.z - p.z,
+            );
+            this.move(
+              p,
+              Math.sin(direction) * 4 * dt,
+              Math.cos(direction) * 4 * dt,
+            );
+            b.mesh.rotation.y = direction;
+            continue;
+          }
+        }
+      }
       const angle = !safe
         ? Math.atan2(-p.x, -p.z)
         : distance < 43
           ? Math.atan2(this.position.x - p.x, this.position.z - p.z)
           : b.seed + Math.sin(this.time * 0.13 + b.seed) * 2;
-      const speed = (!safe ? 5.8 : distance < 13 ? 1.7 : 3.2) * dt;
+      const speed =
+        (!safe ? 5.8 : distance < 3.5 ? 0 : distance < 13 ? 1.7 : 3.2) * dt;
       const old = p.clone();
       this.move(p, Math.sin(angle) * speed, Math.cos(angle) * speed);
       if (p.distanceToSquared(old) < 0.0001) {
@@ -1017,7 +1158,12 @@ export class BattleGame {
           continue;
         }
       }
-      if (distance < 47 && b.cooldown <= 0 && this.state.phase === 'playing') {
+      if (
+        b.armed &&
+        distance < 47 &&
+        b.cooldown <= 0 &&
+        this.state.phase === 'playing'
+      ) {
         const from = p.clone().add(new THREE.Vector3(0, 1.45, 0));
         if (this.visible(from, target)) {
           this.tracer(from, target, '#ff9c73');
@@ -1032,6 +1178,7 @@ export class BattleGame {
       this.aiTimer = 0;
       const alive = this.bots.filter((b) => b.hp > 0);
       for (const b of alive) {
+        if (!b.armed) continue;
         const enemy = alive.find(
           (o) =>
             o !== b &&
@@ -1060,7 +1207,7 @@ export class BattleGame {
       return;
     }
     const interval = this.state.phase === 'playing' ? 1000 / 60 : 1000 / 24;
-    if (now - this.previous < interval) {
+    if (now - this.previous < interval - 1) {
       this.frame = requestAnimationFrame(this.tick);
       return;
     }
@@ -1130,6 +1277,13 @@ export class BattleGame {
       this.velocityY -= 20 * dt;
       this.position.y = Math.max(1.7, this.position.y + this.velocityY * dt);
       if (this.position.y === 1.7) this.velocityY = 0;
+      if (this.correction.lengthSq() > 0.000001) {
+        const step = this.correction
+          .clone()
+          .multiplyScalar(1 - Math.exp(-dt * 12));
+        this.position.add(step);
+        this.correction.sub(step);
+      }
       this.camera.position.copy(this.position);
       this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
       this.camera.fov = THREE.MathUtils.lerp(
@@ -1148,7 +1302,7 @@ export class BattleGame {
         0,
         this.reloadTimer > 0 ? -0.45 : 0,
       );
-      this.gun.scale.setScalar(this.state.weapon === 1 ? 1.12 : 1);
+      this.gun.scale.setScalar(1);
       this.flash.visible = this.recoil > 0.075;
       if (this.shooting) this.shoot();
       this.state.outside =
@@ -1172,7 +1326,7 @@ export class BattleGame {
       );
       this.state.pickup = near
         ? near.kind < 3
-          ? `${WEAPONS[near.kind].name} ammo`
+          ? `${WEAPONS[near.kind].name}${this.state.owned[near.kind] ? ' ammo' : ''}`
           : near.kind === 3
             ? 'Shield cell +50'
             : 'Med kit +45'
@@ -1215,16 +1369,41 @@ export class BattleGame {
       return true;
     });
     this.uiTime += dt;
-    if (this.uiTime > 0.08) {
+    if (this.uiTime > 0.1) {
       this.uiTime = 0;
       if (this.state.phase === 'playing') this.emit();
     }
+    for (const b of this.bots)
+      if (b.tag)
+        b.tag.visible =
+          this.state.phase !== 'lobby' &&
+          b.hp > 0 &&
+          b.mesh.position.distanceToSquared(this.position) < 85 * 85;
     this.renderer.render(this.scene, this.camera);
+    this.framesRendered++;
+    if (now - this.measuredAt >= 1000) {
+      const fps = Math.round(
+        (this.framesRendered * 1000) / (now - this.measuredAt),
+      );
+      this.container.dataset.fps = String(fps);
+      this.container.dataset.drawCalls = String(
+        this.renderer.info.render.calls,
+      );
+      this.framesRendered = 0;
+      this.measuredAt = now;
+      this.slowSamples =
+        this.state.phase === 'playing' && fps < 42 ? this.slowSamples + 1 : 0;
+      if (this.slowSamples >= 2 && this.resolutionScale > 0.6) {
+        this.resolutionScale = Math.max(0.6, this.resolutionScale * 0.85);
+        this.slowSamples = 0;
+        this.resize();
+      }
+    }
     this.frame = requestAnimationFrame(this.tick);
   }
   emit() {
-    this.state.ammo = this.weaponAmmo[this.state.weapon];
-    this.state.reserve = this.reserveAmmo[this.state.weapon];
+    this.state.ammo = this.weaponAmmo[this.state.weapon] ?? 0;
+    this.state.reserve = this.reserveAmmo[this.state.weapon] ?? 0;
     this.state.heading = ((((this.yaw * 180) / Math.PI) % 360) + 360) % 360;
     this.state.x = this.position.x;
     this.state.z = this.position.z;
@@ -1272,7 +1451,9 @@ export class BattleGame {
       this.networkRound = room.round;
       this.networkEvents.clear();
       this.state.phase = 'paused';
-      this.state.weapon = 0;
+      this.state.weapon = -1;
+      this.state.owned = [...me.owned];
+      this.correction.set(0, 0, 0);
       this.state.hit = 0;
       this.state.hurt = 0;
       this.state.pickup = '';
@@ -1285,7 +1466,7 @@ export class BattleGame {
       this.cooldown = 0.3;
       this.resetBots(remotes.length);
       this.spawnLoot();
-      this.gun.visible = true;
+      this.showWeapon();
       this.storm.visible = true;
       this.camera.position.copy(this.position);
       this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
@@ -1293,7 +1474,31 @@ export class BattleGame {
     if (this.bots.length !== remotes.length) this.resetBots(remotes.length);
     this.remoteTargets = remotes.map((p, i) => {
       const b = this.bots[i];
-      b.name = p.name;
+      if (b.name !== p.name) {
+        if (b.tag) {
+          b.mesh.remove(b.tag);
+          b.tag.material.map?.dispose();
+          b.tag.material.dispose();
+        }
+        b.tag = this.nameTag(p.name);
+        if (b.tag) b.mesh.add(b.tag);
+        b.name = p.name;
+      }
+      let held = b.mesh.getObjectByName('Bot weapon');
+      if (p.weapon >= 0 && held?.userData.weapon !== p.weapon) {
+        if (held) {
+          held.removeFromParent();
+          this.disposeObject(held);
+        }
+        held = weaponModel(p.weapon);
+        held.name = 'Bot weapon';
+        held.userData.weapon = p.weapon;
+        held.scale.setScalar(0.8);
+        held.rotation.y = Math.PI;
+        held.position.set(0.35, 1.35, 0.25);
+        b.mesh.add(held);
+      }
+      if (held) held.visible = p.weapon >= 0;
       b.hp = p.health;
       b.mesh.visible = p.health > 0;
       b.mesh.rotation.y = p.yaw + Math.PI;
@@ -1303,8 +1508,11 @@ export class BattleGame {
       const correctionX = me.x - acknowledgedPose.x,
         correctionZ = me.z - acknowledgedPose.z;
       if (Math.hypot(correctionX, correctionZ) > 0.05) {
-        this.position.x += correctionX;
-        this.position.z += correctionZ;
+        if (Math.hypot(correctionX, correctionZ) > 4) {
+          this.position.x += correctionX;
+          this.position.z += correctionZ;
+          this.correction.set(0, 0, 0);
+        } else this.correction.set(correctionX, 0, correctionZ);
       }
     }
     if (me.health < this.state.health || me.shield < this.state.shield)
@@ -1318,6 +1526,12 @@ export class BattleGame {
     this.state.storm = room.storm;
     this.state.outside = Math.hypot(me.x, me.z) > room.storm;
     this.storm.scale.set(room.storm, 1, room.storm);
+    const inventoryChanged = this.state.owned.some(
+      (has, i) => has !== me.owned[i],
+    );
+    this.state.owned = [...me.owned];
+    if (inventoryChanged || newRound) this.state.weapon = me.weapon;
+    this.showWeapon();
     this.weaponAmmo = [...me.ammo];
     this.reserveAmmo = [...me.reserve];
     this.state.reloading = me.reloadUntil > room.now;
@@ -1367,10 +1581,14 @@ export class BattleGame {
       this.state.phase !== 'won'
     )
       this.finish(true);
-    this.emit();
+    if (this.state.phase !== 'playing' || newRound) this.emit();
   }
   disposeObject(object: THREE.Object3D) {
     object.traverse((o) => {
+      if (o instanceof THREE.Sprite) {
+        o.material.map?.dispose();
+        o.material.dispose();
+      }
       if (o instanceof THREE.Mesh) {
         o.geometry.dispose();
         const materials = Array.isArray(o.material) ? o.material : [o.material];

@@ -14,6 +14,7 @@ export type Player = PlayerPose & {
   kills: number;
   rank: number;
   connected: boolean;
+  owned: boolean[];
   ammo: number[];
   reserve: number[];
   reloadUntil: number;

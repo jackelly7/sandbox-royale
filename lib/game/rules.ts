@@ -11,7 +11,7 @@ export const WEAPONS = [
     color: '#8ee8c8',
   },
   {
-    name: 'Breach 12',
+    name: 'Breach Shotgun',
     short: 'SHOTGUN',
     capacity: 6,
     damage: 17,
@@ -19,11 +19,11 @@ export const WEAPONS = [
     reload: 2.1,
     spread: 0.052,
     pellets: 7,
-    color: '#9cb8ff',
+    color: '#ffc06a',
   },
   {
-    name: 'Longshot',
-    short: 'MARKSMAN',
+    name: 'Longshot Sniper',
+    short: 'SNIPER',
     capacity: 5,
     damage: 78,
     interval: 1.05,
@@ -33,6 +33,19 @@ export const WEAPONS = [
     color: '#dcadff',
   },
 ];
+export function cycleWeapon(
+  current: number,
+  owned: boolean[],
+  direction: number,
+) {
+  const available = owned.flatMap((has, i) => (has ? [i] : []));
+  if (!available.length) return -1;
+  const index = available.indexOf(current);
+  if (index < 0) return available[0];
+  return available[
+    (index + (direction > 0 ? 1 : -1) + available.length) % available.length
+  ];
+}
 export const MATCH_LENGTH = 270;
 export const BOT_COUNT = 15;
 export function stormRadius(elapsed: number) {

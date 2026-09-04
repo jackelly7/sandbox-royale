@@ -59,9 +59,19 @@ try {
   );
   assert.ok(Math.abs(observed.z - (p.z - 0.4)) < 0.01);
   console.log('PASS movement reaches another player');
+  assert.equal(observed.weapon, -1);
+  await sync(host, [
+    { type: 'pose', pose: { ...observed, x: 3, z: 62 } },
+    { type: 'pickup', index: 19 },
+  ]);
+  const equipped = (await sync(host)).room.players.find(
+    (p) => p.id === host.playerId,
+  );
+  assert.equal(equipped.weapon, 0);
+  assert.equal(equipped.owned[0], true);
   const shot = {
     seq: (seq.get(host.playerId) || 0) + 1,
-    command: { type: 'shoot', pose: { ...observed, weapon: 0 }, aiming: true },
+    command: { type: 'shoot', pose: { ...equipped, weapon: 0 }, aiming: true },
   };
   seq.set(host.playerId, shot.seq);
   const once = await post({ type: 'sync', ...host, actions: [shot] }),

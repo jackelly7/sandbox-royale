@@ -911,6 +911,16 @@ kbd {
   background: #b2d5bd0a;
 }
 /* Menus */
+.weapon-slot.unowned {
+  opacity: 0.5;
+  filter: grayscale(1);
+}
+.weapon-slot span small {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 1px;
+  margin-top: 3px;
+}
 .pause-overlay {
   position: absolute;
   inset: 0;

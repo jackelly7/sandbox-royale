@@ -11,6 +11,7 @@ async function post(path, data) {
   if (!res.ok) throw new Error(`${res.status}: ${body.error}`);
   return body;
 }
+const sequences = new Map();
 async function connect(session, endpoint = url) {
   const socket = new WebSocket(endpoint.replace(/^http/, 'ws') + '/ws');
   const messages = [];
@@ -42,7 +43,13 @@ async function connect(session, endpoint = url) {
   return {
     socket,
     messages,
-    send: (command) => socket.send(JSON.stringify(command)),
+    send: (command) => {
+      const seq = (sequences.get(session.playerId) || 0) + 1;
+      sequences.set(session.playerId, seq);
+      socket.send(
+        JSON.stringify({ type: 'commands', actions: [{ seq, command }] }),
+      );
+    },
     wait: async (pred) => {
       const deadline = Date.now() + 15000;
       while (Date.now() < deadline) {
@@ -94,6 +101,9 @@ try {
       ),
   );
   console.log('PASS movement propagates to other player');
+  assert.equal(p.weapon, -1);
+  assert.deepEqual(p.owned, [false, false, false]);
+  console.log('PASS players start unarmed');
   b.socket.close();
   c = await connect(bSession, process.env.SECONDARY_TEST_URL || url);
   await c.wait((m) => m.type === 'snapshot' && m.room.phase === 'playing');

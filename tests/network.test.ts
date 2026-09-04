@@ -1,6 +1,87 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MultiplayerClient } from '../lib/game/network.ts';
+import type { PlayerPose } from '../lib/game/multiplayer.ts';
+
+void test('live client sends actions over a persistent socket and reconciles acknowledgments', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
+  const sockets: FakeSocket[] = [];
+  class FakeSocket {
+    readyState = 0;
+    bufferedAmount = 0;
+    sent: string[] = [];
+    onopen: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+    onerror: (() => void) | null = null;
+    onmessage: ((e: { data: string }) => void) | null = null;
+    constructor() {
+      sockets.push(this);
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {
+      this.readyState = 3;
+      this.onclose?.();
+    }
+    open() {
+      this.readyState = 1;
+      this.onopen?.();
+    }
+    receive(data: unknown) {
+      this.onmessage?.({ data: JSON.stringify(data) });
+    }
+  }
+  Object.defineProperty(globalThis, 'WebSocket', {
+    configurable: true,
+    value: FakeSocket,
+  });
+  t.after(() => {
+    if (original) Object.defineProperty(globalThis, 'WebSocket', original);
+    else Reflect.deleteProperty(globalThis, 'WebSocket');
+  });
+  t.mock.method(globalThis, 'fetch', () => {
+    assert.fail('Gameplay must not make HTTP round trips');
+  });
+  let acknowledged: PlayerPose | undefined;
+  const client = new MultiplayerClient(
+    { code: 'ABC234', playerId: 'friend', token: 'test' },
+    (_room, pose) => {
+      acknowledged = pose;
+    },
+    () => {},
+    () => {},
+  );
+  const socket = sockets[0];
+  socket.open();
+  socket.receive({ type: 'ready' });
+  const pose = { x: 1, y: 1.7, z: 62, yaw: 0, pitch: 0, weapon: -1 };
+  client.send({ type: 'pose', pose });
+  client.send({ type: 'pickup', index: 19 });
+  const packet = JSON.parse(socket.sent.at(-1)!);
+  assert.equal(packet.type, 'commands');
+  assert.deepEqual(
+    packet.actions.map((a: { seq: number }) => a.seq),
+    [1, 2],
+  );
+  socket.receive({ type: 'snapshot', ack: 2, room: { phase: 'playing' } });
+  assert.deepEqual(acknowledged, pose);
+  assert.equal(client.pending.length, 0);
+  socket.close();
+  t.mock.timers.tick(500);
+  assert.equal(sockets.length, 2, 'Dropped connections reopen');
+  sockets[1].open();
+  sockets[1].receive({ type: 'ready' });
+  client.send({ type: 'reload' });
+  assert.equal(
+    JSON.parse(sockets[1].sent.at(-1)!).actions[0].seq,
+    3,
+    'Reconnect preserves command sequence',
+  );
+  client.close(false);
+  t.mock.timers.tick(500);
+});
 
 void test('joining still works in browsers without AbortSignal.timeout', async (t) => {
   t.mock.method(AbortSignal, 'timeout', () => {
@@ -76,6 +157,7 @@ void test('an initial room connection stops retrying instead of hanging forever'
     () => assert.fail('No room should have loaded'),
     (status) => statuses.push(status),
     (error) => errors.push(error),
+    'http',
   );
   for (let i = 0; i < 3; i++) {
     await new Promise((resolve) => setImmediate(resolve));
