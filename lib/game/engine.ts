@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { parachuteModel } from './parachute.ts';
 import { weaponModel } from './weapon-models.ts';
 import { batchIsland } from './render-world.ts';
 import type { Command, RoomSnapshot, PlayerPose } from './multiplayer.ts';
@@ -9,10 +10,26 @@ import {
   takeDamage,
   reloadAmmo,
   cycleWeapon,
+  SUPPLIES,
+  SUPPLY_LIMIT,
+  DROP_HEIGHT,
+  DROP_SPEED,
+  beginRecovery,
+  cancelRecovery,
+  completeRecovery,
+  type RecoveryState,
+  type SupplyKind,
 } from './rules.ts';
 
-export type GameState = {
-  phase: 'lobby' | 'playing' | 'paused' | 'won' | 'lost';
+export type GameState = RecoveryState & {
+  phase:
+    | 'lobby'
+    | 'playing'
+    | 'paused'
+    | 'won'
+    | 'lost'
+    | 'spectating'
+    | 'dying';
   health: number;
   shield: number;
   alive: number;
@@ -34,16 +51,42 @@ export type GameState = {
   z: number;
   rank: number;
   bots: { x: number; z: number }[];
+  dropLoot?: { x: number; y: number; kind: number; distance: number }[];
+  healRemaining: number;
+  dropping: boolean;
+  altitude: number;
+  threat: number;
+  killer: string;
+  deathRemaining: number;
+  survived: number;
+  eliminationPulse: number;
+  damageNumber: number;
+  damageShield: boolean;
+  headshot: boolean;
+  shieldBreak: number;
+  damageAngle: number | null;
+  feed: { id: string; text: string; at: number }[];
+  spectator: {
+    id: string;
+    name: string;
+    health: number;
+    shield: number;
+    kills: number;
+  } | null;
 };
 type Bot = {
   mesh: THREE.Group;
   hp: number;
+  shield: number;
   cooldown: number;
   turn: number;
   seed: number;
   name: string;
   tag?: THREE.Sprite;
   armed: boolean;
+  dropping: boolean;
+  dying: number;
+  deathY: number;
 };
 type Loot = { mesh: THREE.Group; kind: number; used: boolean };
 export const landmarks = [
@@ -74,6 +117,25 @@ export class BattleGame {
   state: GameState = {
     phase: 'lobby',
     health: 100,
+    medkits: 0,
+    cells: 0,
+    healing: null,
+    healUntil: 0,
+    healRemaining: 0,
+    dropping: false,
+    altitude: 0,
+    threat: 0,
+    killer: 'The island',
+    deathRemaining: 0,
+    survived: 0,
+    eliminationPulse: 0,
+    damageNumber: 0,
+    damageShield: false,
+    headshot: false,
+    shieldBreak: 0,
+    damageAngle: null,
+    feed: [],
+    spectator: null,
     shield: 50,
     alive: 16,
     kills: 0,
@@ -116,6 +178,10 @@ export class BattleGame {
   reserveAmmo = [0, 0, 0];
   gunModels: THREE.Group[] = [];
   wheelAt = 0;
+  damageTimer = 0;
+  spectatorId: string | null = null;
+  killerId: string | null = null;
+  parachute = parachuteModel();
   correction = new THREE.Vector3();
   renderStats = { before: 0, after: 0 };
   framesRendered = 0;
@@ -189,6 +255,8 @@ export class BattleGame {
       this.loot.map((l) => l.mesh),
     );
     this.world.updateMatrixWorld(true);
+    this.scene.add(this.parachute);
+    this.parachute.visible = false;
     this.buildGun();
     this.resetBots();
     this.bind();
@@ -541,9 +609,19 @@ export class BattleGame {
         ]);
       }
     }
+    // Recovery items beside every landing sector, with additional supplies inland.
+    for (let sector = 0; sector < 8; sector++) {
+      const angle = (sector / 8) * Math.PI * 2;
+      for (let item = 0; item < 2; item++)
+        points.push([
+          Math.sin(angle) * 58 + Math.cos(angle) * (14 + item * 3),
+          Math.cos(angle) * 58 - Math.sin(angle) * (14 + item * 3),
+        ]);
+    }
+    points.push([4, 12], [-5, -12], [15, 4], [-15, 4]);
     points.forEach(([x, z], i) => {
-      const kind = i < 19 ? i % 5 : (i - 19) % 3;
-      const colors = ['#85e2bc', '#ffc06a', '#cf9cf4', '#78dfee', '#ffc377'];
+      const kind = i < 19 ? i % 5 : i < 43 ? (i - 19) % 3 : 3 + ((i - 43) % 2);
+      const colors = ['#85e2bc', '#ffc06a', '#cf9cf4', '#78dfee', '#ff7474'];
       const group = new THREE.Group();
       if (kind < 3) {
         const model = weaponModel(kind);
@@ -553,9 +631,17 @@ export class BattleGame {
         group.add(model);
       } else {
         const item = new THREE.Group();
-        this.box(0.7, 0.8, 0.5, colors[kind], 0, 0, 0, item);
+        if (kind === 3) {
+          const bottle = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.28, 0.28, 0.8, 8),
+            this.material(colors[kind]),
+          );
+          item.add(bottle);
+          this.box(0.4, 0.16, 0.4, '#d9f6ff', 0, 0.45, 0, item);
+        } else this.box(0.7, 0.8, 0.5, colors[kind], 0, 0, 0, item);
         this.box(kind === 4 ? 0.5 : 0.73, 0.13, 0.53, '#fff8de', 0, 0, 0, item);
         if (kind === 4) this.box(0.13, 0.5, 0.53, '#fff8de', 0, 0, 0, item);
+        batchIsland(item, [], Infinity);
         item.position.y = 0.85;
         group.add(item);
       }
@@ -618,28 +704,53 @@ export class BattleGame {
     if (typeof document === 'undefined') return undefined;
     const canvas = document.createElement('canvas');
     canvas.width = 512;
-    canvas.height = 96;
-    const context = canvas.getContext('2d');
-    if (!context) return undefined;
-    context.fillStyle = '#102b34dd';
-    context.fillRect(0, 0, 512, 96);
-    context.fillStyle = '#fff8de';
-    context.font = 'bold 42px sans-serif';
-    context.textAlign = 'center';
-    context.textBaseline = 'middle';
-    context.fillText(name, 256, 48, 484);
-    const material = new THREE.SpriteMaterial({
-      map: new THREE.CanvasTexture(canvas),
-      depthTest: true,
-      depthWrite: false,
-      sizeAttenuation: false,
-    });
-    const sprite = new THREE.Sprite(material);
+    canvas.height = 152;
+    if (!canvas.getContext('2d')) return undefined;
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: new THREE.CanvasTexture(canvas),
+        depthTest: true,
+        depthWrite: false,
+        sizeAttenuation: false,
+      }),
+    );
     sprite.raycast = () => {};
     sprite.name = 'Gamertag: ' + name;
-    sprite.position.set(0, 2.8, 0);
-    sprite.scale.set(0.23, 0.043, 1);
+    sprite.position.set(0, 2.95, 0);
+    sprite.scale.set(0.23, 0.068, 1);
+    this.paintTag(sprite, name, 100, 50);
     return sprite;
+  }
+  paintTag(sprite: THREE.Sprite, name: string, health: number, shield: number) {
+    const key = `${name}:${Math.ceil(health)}:${Math.ceil(shield)}`;
+    if (sprite.userData.vitals === key) return;
+    const texture = sprite.material.map as THREE.CanvasTexture;
+    const canvas = texture.image as HTMLCanvasElement,
+      context = canvas.getContext('2d');
+    if (!context) return;
+    context.clearRect(0, 0, 512, 152);
+    context.fillStyle = '#102b34ee';
+    context.fillRect(0, 0, 512, 152);
+    context.fillStyle = '#fff8de';
+    context.font = 'bold 38px sans-serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    context.fillText(name, 256, 33, 480);
+    context.fillStyle = '#ffffff25';
+    context.fillRect(20, 66, 380, 19);
+    context.fillRect(20, 105, 380, 23);
+    context.fillStyle = '#78dfee';
+    context.fillRect(20, 66, (380 * Math.max(0, shield)) / 100, 19);
+    context.fillStyle = health <= 30 ? '#ff7971' : '#9bef9e';
+    context.fillRect(20, 105, (380 * Math.max(0, health)) / 100, 23);
+    context.font = 'bold 27px sans-serif';
+    context.textAlign = 'right';
+    context.fillStyle = '#78dfee';
+    context.fillText(String(Math.ceil(shield)), 490, 77);
+    context.fillStyle = '#fff8de';
+    context.fillText(String(Math.ceil(health)), 490, 117);
+    sprite.userData.vitals = key;
+    texture.needsUpdate = true;
   }
   resetBots(count = BOT_COUNT) {
     for (const b of this.bots) {
@@ -666,6 +777,9 @@ export class BattleGame {
       held.position.set(0.35, 1.35, 0.25);
       held.visible = false;
       g.add(held);
+      const chute = parachuteModel();
+      chute.visible = false;
+      g.add(chute);
       const tag = this.nameTag(names[i] ?? 'Player');
       if (tag) g.add(tag);
       const a = (i / count) * Math.PI * 2,
@@ -679,12 +793,16 @@ export class BattleGame {
       this.bots.push({
         mesh: g,
         hp: 100,
+        shield: 50,
         cooldown: 2 + i * 0.2,
         turn: 0,
         seed: i * 0.7,
         name: names[i],
         tag,
         armed: false,
+        dropping: false,
+        dying: 0,
+        deathY: 0,
       });
     }
   }
@@ -694,7 +812,14 @@ export class BattleGame {
       this.cleanup.push(() => target.removeEventListener(type, fn));
     };
     on(document, 'keydown', ((e: KeyboardEvent) => {
-      if (this.state.phase !== 'playing') return;
+      if (this.state.phase === 'spectating' && !this.menuOpen) {
+        if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
+          e.preventDefault();
+          this.spectate(e.code === 'BracketLeft' ? -1 : 1);
+        }
+        return;
+      }
+      if (this.state.phase !== 'playing' || this.menuOpen) return;
       if (
         [
           'Space',
@@ -709,9 +834,13 @@ export class BattleGame {
       this.keys.add(e.code);
       if (e.code === 'KeyR') this.reload();
       if (e.code === 'KeyE') this.pickup();
+      if (!e.repeat && e.code === 'KeyQ') this.heal('medkit');
+      if (!e.repeat && e.code === 'KeyF') this.heal('shield');
+      if (!e.repeat && e.code === 'KeyX') this.cancelHeal();
       if (['Digit1', 'Digit2', 'Digit3'].includes(e.code))
         this.selectWeapon(Number(e.code.slice(-1)) - 1);
-      if (e.code === 'Space' && this.position.y <= 1.71) this.velocityY = 7;
+      if (e.code === 'Space' && !this.state.dropping && this.position.y <= 1.71)
+        this.velocityY = 7;
       if (e.code === 'Escape') this.pause();
     }) as EventListener);
     on(this.renderer.domElement, 'wheel', ((e: WheelEvent) => {
@@ -791,6 +920,25 @@ export class BattleGame {
         ...this.state,
         health: 100,
         shield: 50,
+        medkits: 0,
+        cells: 0,
+        healing: null,
+        healUntil: 0,
+        healRemaining: 0,
+        dropping: true,
+        altitude: DROP_HEIGHT,
+        threat: 0,
+        killer: 'The island',
+        deathRemaining: 0,
+        survived: 0,
+        eliminationPulse: 0,
+        damageNumber: 0,
+        damageShield: false,
+        headshot: false,
+        shieldBreak: 0,
+        damageAngle: null,
+        feed: [],
+        spectator: null,
         alive: 16,
         kills: 0,
         ammo: 0,
@@ -807,19 +955,29 @@ export class BattleGame {
         outside: false,
         reloading: false,
       };
-      this.position.set(0, 1.7, 50);
+      this.position.set(0, DROP_HEIGHT, 50);
       this.yaw = 0;
-      this.pitch = 0;
+      this.pitch = -0.6;
       this.velocityY = 0;
       this.weaponAmmo = [0, 0, 0];
       this.reserveAmmo = [0, 0, 0];
       this.reloadTimer = 0;
       this.cooldown = 0.3;
       this.resetBots();
+      for (const b of this.bots) {
+        b.mesh.position.y = DROP_HEIGHT - 1.7;
+        b.dropping = true;
+      }
       this.spawnLoot();
       this.noticeTimer = 5;
       this.aiTimer = 0;
     }
+    if (
+      this.network &&
+      (this.networkRoom?.players.find((p) => p.id === this.network?.playerId)
+        ?.health ?? 0) <= 0
+    )
+      return;
     this.touch = touch;
     this.state.phase = 'playing';
     this.showWeapon();
@@ -855,6 +1013,8 @@ export class BattleGame {
   }
   lobby() {
     this.state.phase = 'lobby';
+    this.state.spectator = null;
+    this.spectatorId = null;
     this.keys.clear();
     this.shooting = false;
     this.aiming = false;
@@ -865,6 +1025,8 @@ export class BattleGame {
   }
   selectWeapon(index: number) {
     if (index < 0 || index > 2 || !this.state.owned[index]) return;
+    if (this.state.phase !== 'playing') return;
+    this.cancelHeal(false);
     this.state.weapon = index;
     this.showWeapon();
     this.network?.send({ type: 'pose', pose: this.pose() });
@@ -883,6 +1045,7 @@ export class BattleGame {
       this.reserveAmmo[i] <= 0
     )
       return;
+    this.cancelHeal(false);
     this.network?.send({ type: 'reload' });
     this.reloadTimer = w.reload;
     this.state.reloading = true;
@@ -890,13 +1053,8 @@ export class BattleGame {
     this.emit();
   }
   pickup() {
-    const l = this.loot.find(
-      (l) =>
-        !l.used &&
-        l.mesh.position.distanceTo(
-          new THREE.Vector3(this.position.x, 0, this.position.z),
-        ) < 3.8,
-    );
+    if (this.state.phase !== 'playing' || this.state.dropping) return;
+    const l = this.nearestLoot();
     if (!l) return;
     if (this.network) {
       this.network.send({ type: 'pickup', index: this.loot.indexOf(l) });
@@ -912,17 +1070,132 @@ export class BattleGame {
         `${WEAPONS[l.kind].name} ${first ? 'collected' : 'ammo collected'}`,
       );
     }
-    if (l.kind === 3) {
-      this.state.shield = Math.min(100, this.state.shield + 50);
-      this.notice('+50 shield');
-    }
-    if (l.kind === 4) {
-      this.state.health = Math.min(100, this.state.health + 45);
-      this.notice('+45 health');
+    if (l.kind >= 3) {
+      const item = l.kind === 3 ? 'shield' : 'medkit',
+        supply = SUPPLIES[item];
+      if (this.state[supply.slot] >= SUPPLY_LIMIT) {
+        this.notice(`${supply.name} inventory full`);
+        return;
+      }
+      this.state[supply.slot]++;
+      this.notice(
+        `${supply.name} stored. Press ${item === 'medkit' ? 'Q' : 'F'} to use.`,
+      );
     }
     l.used = true;
     l.mesh.visible = false;
     this.sound(620, 0.16, 0.07, 'sine');
+    this.emit();
+  }
+  nearestLoot() {
+    let nearest: Loot | undefined,
+      distance = 3.8 * 3.8;
+    for (const loot of this.loot) {
+      if (
+        loot.used ||
+        (loot.kind >= 3 &&
+          this.state[loot.kind === 3 ? 'cells' : 'medkits'] >= SUPPLY_LIMIT)
+      )
+        continue;
+      const d =
+        (loot.mesh.position.x - this.position.x) ** 2 +
+        (loot.mesh.position.z - this.position.z) ** 2;
+      if (d < distance) {
+        distance = d;
+        nearest = loot;
+      }
+    }
+    return nearest;
+  }
+  heal(item: SupplyKind) {
+    if (
+      this.state.phase !== 'playing' ||
+      this.state.dropping ||
+      (this.network && this.networkRoom?.phase !== 'playing')
+    )
+      return;
+    if (!beginRecovery(this.state, item, this.state.elapsed * 1000)) {
+      this.notice(
+        this.state.healing
+          ? 'Already healing. X to cancel.'
+          : this.state[SUPPLIES[item].stat] >= 100
+            ? `${item === 'medkit' ? 'Health' : 'Shield'} is full`
+            : `Find a ${SUPPLIES[item].name.toLowerCase()} first`,
+      );
+      return;
+    }
+    this.network?.send({ type: 'heal', item });
+    this.reloadTimer = 0;
+    this.state.reloading = false;
+    this.shooting = false;
+    this.aiming = false;
+    this.state.healRemaining = SUPPLIES[item].seconds;
+    this.sound(430, 0.1, 0.035, 'sine');
+    this.emit();
+  }
+  cancelHeal(message = true) {
+    if (!this.state.healing) return;
+    cancelRecovery(this.state);
+    this.state.healRemaining = 0;
+    this.network?.send({ type: 'cancelHeal' });
+    if (message) this.notice('Healing canceled. Item saved.');
+  }
+  hitFeedback(
+    amount: number,
+    shieldDamage: number,
+    headshot: boolean,
+    shieldBreak: boolean,
+  ) {
+    this.state.damageNumber = Math.round(
+      (this.damageTimer > 0 ? this.state.damageNumber : 0) + amount,
+    );
+    this.state.damageShield = shieldDamage > 0;
+    this.state.headshot = headshot;
+    this.damageTimer = 0.8;
+    this.state.hit = 0.2;
+    if (shieldBreak) {
+      this.state.shieldBreak = 1.2;
+      this.sound(1200, 0.16, 0.045, 'triangle');
+    }
+  }
+  addFeed(text: string, id = `${this.time}-${Math.random()}`) {
+    this.state.feed = [
+      ...(this.state.feed ?? []),
+      { id, text, at: this.time },
+    ].slice(-4);
+  }
+  spectate(direction = 1) {
+    if (
+      !this.network ||
+      this.state.health > 0 ||
+      !this.networkRoom ||
+      !['playing', 'finished'].includes(this.networkRoom.phase)
+    )
+      return;
+    const alive = this.networkRoom.players.filter((p) => p.health > 0);
+    if (!alive.length) return;
+    const current = alive.findIndex((p) => p.id === this.spectatorId);
+    const next =
+      alive[
+        (current < 0 ? 0 : current + direction + alive.length) % alive.length
+      ];
+    this.spectatorId = next.id;
+    this.state.spectator = {
+      id: next.id,
+      name: next.name,
+      health: next.health,
+      shield: next.shield,
+      kills: next.kills,
+    };
+    this.state.phase = 'spectating';
+    this.gun.visible = false;
+    this.emit();
+  }
+  stopSpectating() {
+    if (this.state.phase !== 'spectating') return;
+    this.state.phase = 'lost';
+    this.state.spectator = null;
+    this.spectatorId = null;
     this.emit();
   }
   notice(text: string) {
@@ -955,7 +1228,9 @@ export class BattleGame {
     osc.stop(this.audio.currentTime + duration);
   }
   shoot() {
+    if (this.state.dropping || this.state.phase !== 'playing') return;
     if (this.state.weapon < 0 || !this.state.owned[this.state.weapon]) return;
+    this.cancelHeal(false);
     const i = this.state.weapon,
       w = WEAPONS[i];
     if (this.network && this.networkRoom?.phase !== 'playing') return;
@@ -996,7 +1271,21 @@ export class BattleGame {
         const b = this.bots[first.object.userData.bot];
         if (b.hp > 0) {
           const headshot = first.point.y - b.mesh.position.y > 1.72;
-          b.hp -= w.damage * (headshot ? 1.65 : 1);
+          const before = b.hp + b.shield,
+            oldShield = b.shield;
+          const result = takeDamage(
+            b.hp,
+            b.shield,
+            w.damage * (headshot ? 1.65 : 1),
+          );
+          b.hp = result.health;
+          b.shield = result.shield;
+          this.hitFeedback(
+            before - b.hp - b.shield,
+            oldShield - b.shield,
+            headshot,
+            oldShield > 0 && b.shield === 0,
+          );
           hit = true;
           if (b.hp <= 0) this.killBot(b, true);
         }
@@ -1025,24 +1314,63 @@ export class BattleGame {
     this.scene.add(line);
     this.tracers.push({ mesh: line, life: 0.08 });
   }
+  beginBotDeath(b: Bot) {
+    b.dying = 0.9;
+    b.deathY = b.mesh.position.y;
+    const chute = b.mesh.getObjectByName('Parachute');
+    if (chute) chute.visible = false;
+    if (b.tag) b.tag.visible = false;
+  }
   killBot(b: Bot, player = false) {
+    this.beginBotDeath(b);
     b.hp = 0;
-    b.mesh.visible = false;
     if (player) {
       this.state.kills++;
+      this.state.eliminationPulse = 1;
       this.notice(`Eliminated ${b.name}`);
     }
+    this.addFeed(`${player ? 'You' : 'The island'} eliminated ${b.name}`);
     this.state.alive = this.bots.filter((b) => b.hp > 0).length + 1;
   }
-  damage(amount: number) {
+  damage(amount: number, from?: THREE.Vector3, killer = 'The storm') {
+    this.state.killer = killer;
+    this.cancelHeal();
+    this.state.damageAngle = from
+      ? ((Math.atan2(-(from.x - this.position.x), -(from.z - this.position.z)) -
+          this.yaw) *
+          -180) /
+        Math.PI
+      : null;
     const d = takeDamage(this.state.health, this.state.shield, amount);
     Object.assign(this.state, d);
-    this.state.hurt = 0.3;
+    this.state.hurt = 0.7;
+    if (from) this.incomingFire(from);
     if (this.state.health <= 0) this.finish(false);
+  }
+  incomingFire(from: THREE.Vector3) {
+    this.state.threat = 1.2;
+    this.state.damageAngle =
+      ((Math.atan2(-(from.x - this.position.x), -(from.z - this.position.z)) -
+        this.yaw) *
+        -180) /
+      Math.PI;
+  }
+  completeDeath() {
+    if (this.state.phase !== 'dying') return;
+    this.state.phase = 'lost';
+    this.spectatorId = this.killerId;
+    this.spectate(0);
+    this.emit();
   }
   finish(won: boolean) {
     if (!this.network) this.state.rank = won ? 1 : this.state.alive;
-    this.state.phase = won ? 'won' : 'lost';
+    this.state.survived = this.state.elapsed;
+    this.state.phase = won ? 'won' : 'dying';
+    this.state.deathRemaining = won ? 0 : 1.4;
+    this.state.dropping = false;
+    this.gun.visible = false;
+    cancelRecovery(this.state);
+    this.state.healRemaining = 0;
     this.shooting = false;
     this.keys.clear();
     this.aiming = false;
@@ -1072,8 +1400,8 @@ export class BattleGame {
     );
   }
   move(pos: THREE.Vector3, dx: number, dz: number) {
-    if (!this.blocked(pos.x + dx, pos.z)) pos.x += dx;
-    if (!this.blocked(pos.x, pos.z + dz)) pos.z += dz;
+    if (pos.y > 3.1 || !this.blocked(pos.x + dx, pos.z)) pos.x += dx;
+    if (pos.y > 3.1 || !this.blocked(pos.x, pos.z + dz)) pos.z += dz;
     const length = Math.hypot(pos.x, pos.z);
     if (length > 110) {
       pos.x *= 110 / length;
@@ -1094,6 +1422,28 @@ export class BattleGame {
       if (b.hp <= 0) continue;
       const p = b.mesh.position,
         distance = p.distanceTo(this.position);
+      if (b.dropping) {
+        p.y = Math.max(0, p.y - DROP_SPEED * dt);
+        if (p.y === 0) {
+          p.copy(this.safePosition(p.x, p.z));
+          b.dropping = false;
+        } else {
+          const nearest = this.loot
+            .filter((l) => !l.used && l.kind < 3)
+            .sort(
+              (a, c) =>
+                Math.hypot(a.mesh.position.x - p.x, a.mesh.position.z - p.z) -
+                Math.hypot(c.mesh.position.x - p.x, c.mesh.position.z - p.z),
+            )[0];
+          if (nearest) {
+            const delta = nearest.mesh.position.clone().sub(p);
+            delta.y = 0;
+            delta.clampLength(0, 5 * dt);
+            p.add(delta);
+          }
+        }
+        continue;
+      }
       b.cooldown -= dt;
       const safe = Math.hypot(p.x, p.z) < this.state.storm - 5;
       if (!b.armed) {
@@ -1167,8 +1517,9 @@ export class BattleGame {
         const from = p.clone().add(new THREE.Vector3(0, 1.45, 0));
         if (this.visible(from, target)) {
           this.tracer(from, target, '#ff9c73');
+          this.incomingFire(from);
           if (Math.random() < (distance < 18 ? 0.68 : 0.38))
-            this.damage(5 + Math.random() * 4);
+            this.damage(5 + Math.random() * 4, from, b.name);
         }
         b.cooldown = 1.1 + Math.random() * 1.4;
       }
@@ -1190,7 +1541,13 @@ export class BattleGame {
           to = enemy.mesh.position.clone().add(new THREE.Vector3(0, 1.4, 0));
         if (this.visible(from, to)) {
           this.tracer(from, to, '#ffe9a8');
-          enemy.hp -= 9 + Math.random() * 12;
+          const result = takeDamage(
+            enemy.hp,
+            enemy.shield,
+            9 + Math.random() * 12,
+          );
+          enemy.hp = result.health;
+          enemy.shield = result.shield;
           if (enemy.hp <= 0) this.killBot(enemy);
         }
       }
@@ -1206,7 +1563,11 @@ export class BattleGame {
       this.frame = requestAnimationFrame(this.tick);
       return;
     }
-    const interval = this.state.phase === 'playing' ? 1000 / 60 : 1000 / 24;
+    const interval = ['playing', 'spectating', 'dying'].includes(
+      this.state.phase,
+    )
+      ? 1000 / 60
+      : 1000 / 24;
     if (now - this.previous < interval - 1) {
       this.frame = requestAnimationFrame(this.tick);
       return;
@@ -1214,6 +1575,32 @@ export class BattleGame {
     const dt = Math.min((now - this.previous) / 1000 || 0, 0.04);
     this.previous = now;
     this.time += dt;
+    this.state.threat = Math.max(0, (this.state.threat ?? 0) - dt);
+    this.state.eliminationPulse = Math.max(
+      0,
+      (this.state.eliminationPulse ?? 0) - dt,
+    );
+    if (!this.state.threat) this.state.damageAngle = null;
+    if (this.state.phase === 'dying') {
+      this.state.deathRemaining = Math.max(0, this.state.deathRemaining - dt);
+      this.camera.position.y = THREE.MathUtils.lerp(
+        this.camera.position.y,
+        0.6,
+        dt * 4,
+      );
+      this.camera.rotation.z = THREE.MathUtils.lerp(
+        this.camera.rotation.z,
+        0.3,
+        dt * 4,
+      );
+      if (!this.state.deathRemaining) this.completeDeath();
+    }
+    this.damageTimer = Math.max(0, (this.damageTimer ?? 0) - dt);
+    if (!this.damageTimer) this.state.damageNumber = 0;
+    this.state.shieldBreak = Math.max(0, (this.state.shieldBreak ?? 0) - dt);
+    this.state.feed = (this.state.feed ?? []).filter(
+      (e) => this.time - e.at < 7,
+    );
     if (this.state.phase === 'lobby') {
       const t = window.matchMedia('(prefers-reduced-motion: reduce)').matches
         ? 0
@@ -1221,7 +1608,16 @@ export class BattleGame {
       this.camera.position.set(83 + Math.sin(t) * 8, 55, 93 + Math.cos(t) * 8);
       this.camera.lookAt(0, 2, -8);
     } else if (this.state.phase === 'playing') {
-      if (!this.network) this.state.elapsed += dt;
+      if (!this.network) {
+        this.state.elapsed += dt;
+        if (completeRecovery(this.state, this.state.elapsed * 1000)) {
+          this.notice('Recovery complete');
+          this.sound(740, 0.2, 0.045, 'sine');
+        }
+      }
+      this.state.healRemaining = this.state.healing
+        ? Math.max(0, (this.state.healUntil - this.state.elapsed * 1000) / 1000)
+        : 0;
       if (!this.network) this.state.storm = stormRadius(this.state.elapsed);
       this.storm.scale.set(this.state.storm, 1, this.state.storm);
       this.cooldown = Math.max(0, this.cooldown - dt);
@@ -1260,10 +1656,12 @@ export class BattleGame {
       const speed =
         (this.network && this.networkRoom?.phase !== 'playing'
           ? 0
-          : this.keys.has('ShiftLeft')
-            ? 11
-            : 7) *
-        (this.aiming ? 0.6 : 1) *
+          : this.state.dropping
+            ? 9
+            : this.keys.has('ShiftLeft')
+              ? 11
+              : 7) *
+        (this.state.healing ? 0.5 : this.aiming ? 0.6 : 1) *
         dt;
       this.move(
         this.position,
@@ -1274,8 +1672,24 @@ export class BattleGame {
       if (this.keys.has('ArrowRight')) this.yaw -= dt * 1.5;
       if (this.network && this.networkRoom?.phase === 'countdown')
         this.velocityY = 0;
-      this.velocityY -= 20 * dt;
-      this.position.y = Math.max(1.7, this.position.y + this.velocityY * dt);
+      if (this.state.dropping) {
+        if (!this.network || this.networkRoom?.phase === 'playing')
+          this.position.y = Math.max(1.7, this.position.y - DROP_SPEED * dt);
+        this.velocityY = 0;
+        if (!this.network && this.position.y <= 1.7) {
+          this.state.dropping = false;
+          this.position.copy(
+            this.safePosition(this.position.x, this.position.z),
+          );
+          this.position.y = 1.7;
+          this.notice('Landed. Find a weapon and press E.');
+          this.sound(110, 0.18, 0.035, 'triangle');
+        }
+      } else {
+        this.velocityY -= 20 * dt;
+        this.position.y = Math.max(1.7, this.position.y + this.velocityY * dt);
+      }
+      this.state.altitude = Math.max(0, this.position.y - 1.7);
       if (this.position.y === 1.7) this.velocityY = 0;
       if (this.correction.lengthSq() > 0.000001) {
         const step = this.correction
@@ -1316,20 +1730,13 @@ export class BattleGame {
         !this.network
       )
         this.finish(true);
-      const near = this.loot.find(
-        (l) =>
-          !l.used &&
-          Math.hypot(
-            l.mesh.position.x - this.position.x,
-            l.mesh.position.z - this.position.z,
-          ) < 3.8,
-      );
+      const near = this.state.dropping ? undefined : this.nearestLoot();
       this.state.pickup = near
         ? near.kind < 3
           ? `${WEAPONS[near.kind].name}${this.state.owned[near.kind] ? ' ammo' : ''}`
           : near.kind === 3
-            ? 'Shield cell +50'
-            : 'Med kit +45'
+            ? 'Shield cell · F to use'
+            : 'Medkit · Q to use'
         : '';
       this.noticeTimer -= dt;
       if (this.noticeTimer <= 0) this.state.notice = '';
@@ -1337,7 +1744,7 @@ export class BattleGame {
     if (this.network) {
       this.bots.forEach((b, i) => {
         const target = this.remoteTargets[i];
-        if (target) {
+        if (target && b.hp > 0) {
           b.mesh.position.lerp(target, Math.min(1, dt * 15));
           b.mesh.children[4].rotation.x = Math.sin(this.time * 9) * 0.2;
           b.mesh.children[6].rotation.x = -Math.sin(this.time * 9) * 0.2;
@@ -1351,6 +1758,45 @@ export class BattleGame {
           this.networkRoom?.phase === 'playing'
         )
           this.network.send({ type: 'pose', pose: this.pose() });
+      }
+    }
+    if (this.state.phase === 'spectating' && this.networkRoom) {
+      let target = this.networkRoom.players.find(
+        (p) => p.id === this.spectatorId && p.health > 0,
+      );
+      if (!target) {
+        this.spectate();
+        target = this.networkRoom.players.find(
+          (p) => p.id === this.spectatorId && p.health > 0,
+        );
+      }
+      if (target) {
+        const remotes = this.networkRoom.players.filter(
+          (p) => p.id !== this.network?.playerId,
+        );
+        this.bots.forEach((b, i) => {
+          b.mesh.visible =
+            (b.hp > 0 || b.dying > 0) && remotes[i]?.id !== target.id;
+        });
+        this.camera.position.lerp(
+          new THREE.Vector3(target.x, target.y, target.z),
+          Math.min(1, dt * 18),
+        );
+        this.camera.quaternion.slerp(
+          new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(target.pitch, target.yaw, 0, 'YXZ'),
+          ),
+          Math.min(1, dt * 18),
+        );
+        this.camera.fov = 72;
+        this.camera.updateProjectionMatrix();
+        this.state.spectator = {
+          id: target.id,
+          name: target.name,
+          health: target.health,
+          shield: target.shield,
+          kills: target.kills,
+        };
       }
     }
     for (const l of this.loot)
@@ -1371,14 +1817,34 @@ export class BattleGame {
     this.uiTime += dt;
     if (this.uiTime > 0.1) {
       this.uiTime = 0;
-      if (this.state.phase === 'playing') this.emit();
+      for (const b of this.bots)
+        if (b.tag) this.paintTag(b.tag, b.name, b.hp, b.shield);
+      if (['playing', 'spectating', 'dying'].includes(this.state.phase))
+        this.emit();
     }
-    for (const b of this.bots)
+    if (this.parachute) {
+      this.parachute.visible =
+        this.state.dropping && this.state.phase === 'playing';
+      this.parachute.position
+        .copy(this.position)
+        .add(new THREE.Vector3(0, -1.7, 0));
+    }
+    for (const b of this.bots) {
+      const chute = b.mesh.getObjectByName('Parachute');
+      if (chute) chute.visible = b.dropping && b.hp > 0;
+      if (b.hp <= 0 && b.dying > 0) {
+        b.dying = Math.max(0, b.dying - dt);
+        const progress = 1 - b.dying / 0.9;
+        b.mesh.rotation.z = progress * 1.45;
+        b.mesh.position.y = b.deathY - progress * 0.4;
+        b.mesh.visible = b.dying > 0;
+      }
       if (b.tag)
         b.tag.visible =
           this.state.phase !== 'lobby' &&
           b.hp > 0 &&
-          b.mesh.position.distanceToSquared(this.position) < 85 * 85;
+          b.mesh.position.distanceToSquared(this.camera.position) < 85 * 85;
+    }
     this.renderer.render(this.scene, this.camera);
     this.framesRendered++;
     if (now - this.measuredAt >= 1000) {
@@ -1402,11 +1868,62 @@ export class BattleGame {
     this.frame = requestAnimationFrame(this.tick);
   }
   emit() {
+    this.state.dropLoot = [];
+    if (this.state.dropping && this.state.phase === 'playing') {
+      this.camera.updateMatrixWorld();
+      const visible = this.loot
+        .filter((l) => !l.used)
+        .map((l) => {
+          const point = l.mesh.position
+            .clone()
+            .add(new THREE.Vector3(0, 1, 0))
+            .project(this.camera);
+          return {
+            x: (point.x + 1) * 50,
+            y: (1 - point.y) * 50,
+            z: point.z,
+            kind: l.kind,
+            distance: Math.hypot(
+              l.mesh.position.x - this.position.x,
+              l.mesh.position.z - this.position.z,
+            ),
+          };
+        })
+        .filter(
+          (p) =>
+            p.z > -1 &&
+            p.z < 1 &&
+            p.x > 5 &&
+            p.x < 95 &&
+            p.y > 15 &&
+            p.y < 70 &&
+            p.distance < 90,
+        )
+        .sort((a, b) => a.distance - b.distance);
+      for (const item of visible) {
+        if (this.state.dropLoot.length >= 8) break;
+        if (
+          !this.state.dropLoot.some(
+            (p) => Math.abs(p.x - item.x) < 9 && Math.abs(p.y - item.y) < 7,
+          )
+        )
+          this.state.dropLoot.push(item);
+      }
+    }
     this.state.ammo = this.weaponAmmo[this.state.weapon] ?? 0;
     this.state.reserve = this.reserveAmmo[this.state.weapon] ?? 0;
     this.state.heading = ((((this.yaw * 180) / Math.PI) % 360) + 360) % 360;
-    this.state.x = this.position.x;
-    this.state.z = this.position.z;
+    const watched =
+      this.state.phase === 'spectating'
+        ? this.networkRoom?.players.find((p) => p.id === this.spectatorId)
+        : null;
+    this.state.x = watched?.x ?? this.position.x;
+    this.state.z = watched?.z ?? this.position.z;
+    if (watched) {
+      this.state.heading =
+        ((((watched.yaw * 180) / Math.PI) % 360) + 360) % 360;
+      this.state.outside = Math.hypot(watched.x, watched.z) > this.state.storm;
+    }
     this.state.bots = this.bots
       .filter((b) => b.hp > 0)
       .map((b) => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
@@ -1451,6 +1968,18 @@ export class BattleGame {
       this.networkRound = room.round;
       this.networkEvents.clear();
       this.state.phase = 'paused';
+      this.killerId = null;
+      this.state.killer = 'The island';
+      this.state.deathRemaining = 0;
+      this.state.threat = 0;
+      this.state.survived = 0;
+      this.state.eliminationPulse = 0;
+      this.spectatorId = null;
+      this.state.spectator = null;
+      this.state.feed = [];
+      this.state.damageNumber = 0;
+      this.state.damageAngle = null;
+      this.state.shieldBreak = 0;
       this.state.weapon = -1;
       this.state.owned = [...me.owned];
       this.correction.set(0, 0, 0);
@@ -1460,7 +1989,7 @@ export class BattleGame {
       this.state.notice = 'Click Enter match when you are ready.';
       this.position.set(me.x, me.y, me.z);
       this.yaw = me.yaw;
-      this.pitch = 0;
+      this.pitch = -0.6;
       this.velocityY = 0;
       this.reloadTimer = 0;
       this.cooldown = 0.3;
@@ -1474,6 +2003,7 @@ export class BattleGame {
     if (this.bots.length !== remotes.length) this.resetBots(remotes.length);
     this.remoteTargets = remotes.map((p, i) => {
       const b = this.bots[i];
+      if (newRound) b.mesh.position.set(p.x, p.y - 1.7, p.z);
       if (b.name !== p.name) {
         if (b.tag) {
           b.mesh.remove(b.tag);
@@ -1499,8 +2029,11 @@ export class BattleGame {
         b.mesh.add(held);
       }
       if (held) held.visible = p.weapon >= 0;
+      if (p.health <= 0 && b.hp > 0) this.beginBotDeath(b);
       b.hp = p.health;
-      b.mesh.visible = p.health > 0;
+      b.shield = p.shield;
+      b.dropping = p.dropping;
+      b.mesh.visible = p.health > 0 || b.dying > 0;
       b.mesh.rotation.y = p.yaw + Math.PI;
       return new THREE.Vector3(p.x, p.y - 1.7, p.z);
     });
@@ -1517,6 +2050,30 @@ export class BattleGame {
     }
     if (me.health < this.state.health || me.shield < this.state.shield)
       this.state.hurt = 0.3;
+    if (me.dropping)
+      this.position.y = THREE.MathUtils.lerp(this.position.y, me.y, 0.5);
+    if (this.state.dropping && !me.dropping && me.health > 0) {
+      this.position.set(me.x, me.y, me.z);
+      this.velocityY = 0;
+      this.correction.set(0, 0, 0);
+      this.notice('Landed. Find a weapon and press E.');
+    }
+    this.state.dropping = me.dropping && me.health > 0;
+    this.state.altitude = Math.max(0, me.y - 1.7);
+    const wasHealing = this.state.healing;
+    this.state.medkits = me.medkits ?? 0;
+    this.state.cells = me.cells ?? 0;
+    this.state.healing = me.healing ?? null;
+    this.state.healUntil = me.healUntil ? me.healUntil - room.startAt : 0;
+    this.state.healRemaining = me.healing
+      ? Math.max(0, (me.healUntil - room.now) / 1000)
+      : 0;
+    if (
+      wasHealing &&
+      !me.healing &&
+      (me.health < this.state.health || me.shield < this.state.shield)
+    )
+      this.notice('Healing interrupted. Item saved.');
     this.state.health = me.health;
     this.state.shield = me.shield;
     this.state.kills = me.kills;
@@ -1532,6 +2089,7 @@ export class BattleGame {
     this.state.owned = [...me.owned];
     if (inventoryChanged || newRound) this.state.weapon = me.weapon;
     this.showWeapon();
+    if (me.health <= 0) this.gun.visible = false;
     this.weaponAmmo = [...me.ammo];
     this.reserveAmmo = [...me.reserve];
     this.state.reloading = me.reloadUntil > room.now;
@@ -1546,21 +2104,61 @@ export class BattleGame {
       this.networkEvents.add(e.id);
       if (e.type === 'shot' && e.player !== me.id && e.end) {
         const p = room.players.find((p) => p.id === e.player);
-        if (p)
+        if (p) {
+          const from = new THREE.Vector3(p.x, p.y, p.z),
+            end = new THREE.Vector3(...e.end);
+          if (
+            me.health > 0 &&
+            new THREE.Line3(from, end)
+              .closestPointToPoint(this.position, true, new THREE.Vector3())
+              .distanceTo(this.position) < 3
+          )
+            this.incomingFire(from);
           this.tracer(
             new THREE.Vector3(p.x, p.y, p.z),
             new THREE.Vector3(...e.end),
             '#ffce8f',
           );
+        }
       }
       if (e.type === 'hit' && e.player === me.id) {
-        this.state.hit = 0.18;
+        this.hitFeedback(
+          e.amount ?? 0,
+          e.shieldDamage ?? 0,
+          e.headshot ?? false,
+          e.shieldBreak ?? false,
+        );
         this.sound(900, 0.06, 0.035, 'sine');
+      }
+      if (e.type === 'hit' && e.target === me.id) {
+        const source = room.players.find((p) => p.id === e.player);
+        if (source) {
+          this.state.hurt = 0.7;
+          this.incomingFire(new THREE.Vector3(source.x, source.y, source.z));
+        }
+        if (source)
+          this.state.damageAngle =
+            ((Math.atan2(-(source.x - me.x), -(source.z - me.z)) - this.yaw) *
+              -180) /
+            Math.PI;
+      }
+      if (e.type === 'heal' && e.player === me.id) {
+        this.notice(`${e.item === 'medkit' ? 'Health' : 'Shield'} restored`);
+        this.sound(740, 0.2, 0.045, 'sine');
       }
       if (e.type === 'elimination') {
         const winner =
-            room.players.find((p) => p.id === e.player)?.name ?? 'Player',
+            room.players.find((p) => p.id === e.player)?.name ?? 'The storm',
           loser = room.players.find((p) => p.id === e.target)?.name ?? 'Player';
+        if (e.target === me.id) {
+          this.killerId = e.player;
+          this.state.killer = winner;
+        }
+        if (e.player === me.id) {
+          this.state.eliminationPulse = 1;
+          this.sound(600, 0.25, 0.05, 'triangle');
+        }
+        this.addFeed(`${winner} eliminated ${loser}`, e.id);
         this.notice(
           e.player === me.id
             ? `Eliminated ${loser}`
@@ -1572,16 +2170,34 @@ export class BattleGame {
         this.sound(620, 0.16, 0.07, 'sine');
       }
     }
+    if (me.killedBy) {
+      this.killerId = me.killedBy;
+      this.state.killer =
+        room.players.find((p) => p.id === me.killedBy)?.name ?? 'Player';
+    }
     if (this.networkEvents.size > 300)
       this.networkEvents = new Set(room.events.map((e) => e.id));
-    if (me.health <= 0 && this.state.phase !== 'lost') this.finish(false);
+    if (
+      me.health <= 0 &&
+      this.state.phase !== 'lost' &&
+      this.state.phase !== 'spectating' &&
+      this.state.phase !== 'dying'
+    ) {
+      this.finish(false);
+      if (me.diedAt)
+        this.state.survived = Math.max(0, (me.diedAt - room.startAt) / 1000);
+    }
     if (
       room.phase === 'finished' &&
       room.winner === me.id &&
       this.state.phase !== 'won'
     )
       this.finish(true);
-    if (this.state.phase !== 'playing' || newRound) this.emit();
+    if (
+      ['lobby', 'paused', 'won', 'lost'].includes(this.state.phase) ||
+      newRound
+    )
+      this.emit();
   }
   disposeObject(object: THREE.Object3D) {
     object.traverse((o) => {

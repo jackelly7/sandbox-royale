@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { BattleGame, type GameState } from '../lib/game/engine.ts';
+import { parachuteModel } from '../lib/game/parachute.ts';
 import { batchIsland } from '../lib/game/render-world.ts';
 import { weaponModel } from '../lib/game/weapon-models.ts';
 
@@ -20,6 +21,11 @@ function arena() {
     tracers: [],
     weaponAmmo: [30, 6, 5],
     reserveAmmo: [120, 30, 20],
+    yaw: 0,
+    pitch: 0,
+    time: 0,
+    gun: new THREE.Group(),
+    keys: new Set(),
     cooldown: 0,
     reloadTimer: 0,
     recoil: 0,
@@ -44,6 +50,25 @@ function arena() {
       rank: 16,
       phase: 'playing',
       health: 100,
+      medkits: 0,
+      cells: 0,
+      healing: null,
+      healUntil: 0,
+      healRemaining: 0,
+      dropping: false,
+      altitude: 0,
+      threat: 0,
+      killer: 'The island',
+      deathRemaining: 0,
+      survived: 0,
+      eliminationPulse: 0,
+      damageNumber: 0,
+      damageShield: false,
+      headshot: false,
+      shieldBreak: 0,
+      damageAngle: null,
+      feed: [],
+      spectator: null,
       shield: 50,
       alive: 16,
       kills: 0,
@@ -66,6 +91,7 @@ void test('a scoped headshot eliminates a rival and consumes exactly one round',
       b.mesh.visible = false;
     }
   });
+  game.bots[0].shield = 0;
   game.bots[0].mesh.position.set(0, 0, 0);
   game.camera.position.set(0, 1.96, 10);
   game.camera.lookAt(0, 1.96, 0);
@@ -73,7 +99,10 @@ void test('a scoped headshot eliminates a rival and consumes exactly one round',
   game.shoot();
   assert.equal(game.weaponAmmo[2], 4);
   assert.equal(game.state.kills, 1);
-  assert.equal(game.bots[0].mesh.visible, false);
+  assert.ok(
+    game.bots[0].dying > 0,
+    'Eliminated rival falls before disappearing',
+  );
   assert.equal(game.state.alive, 1);
   assert.ok(game.state.hit > 0);
   game.disposeObject(game.scene);
@@ -210,4 +239,106 @@ void test('room forms stop GPU rendering while the animation loop stays resumabl
   hidden = true;
   game.tick(2200);
   assert.equal(renders, 1, 'Background tabs must not render');
+});
+
+void test('solo recovery uses inventory and retains the item when interrupted', () => {
+  const game = arena();
+  game.state.health = 30;
+  game.state.medkits = 1;
+  game.heal('medkit');
+  assert.equal(game.state.healing, 'medkit');
+  assert.equal(game.state.healRemaining, 4);
+  game.damage(5, new THREE.Vector3(10, 1.7, 50));
+  assert.equal(game.state.healing, null);
+  assert.equal(game.state.medkits, 1);
+  assert.equal(game.state.damageAngle, 90);
+});
+void test('spectators cycle only living players and cannot heal or claim supplies', () => {
+  const game = arena();
+  Object.assign(game, {
+    gun: new THREE.Group(),
+    network: {
+      playerId: 'me',
+      send: () => assert.fail('Spectators cannot send game actions'),
+    },
+    networkRoom: {
+      phase: 'playing',
+      players: [
+        { id: 'me', name: 'Me', health: 0 },
+        { id: 'one', name: 'First', health: 50, shield: 10, kills: 2 },
+        { id: 'dead', name: 'Eliminated', health: 0 },
+        { id: 'two', name: 'Second', health: 90, shield: 50, kills: 0 },
+      ],
+    },
+  });
+  game.state.health = 0;
+  game.state.phase = 'lost';
+  game.state.medkits = 1;
+  game.spectate();
+  assert.equal(game.state.phase, 'spectating');
+  assert.equal(game.state.spectator?.id, 'one');
+  game.spectate();
+  assert.equal(game.state.spectator?.id, 'two');
+  game.spectate(-1);
+  assert.equal(game.state.spectator?.id, 'one');
+  game.heal('medkit');
+  game.pickup();
+  assert.equal(game.state.healing, null);
+  game.stopSpectating();
+  assert.equal(game.state.phase, 'lost');
+});
+void test('recovery models are distinct, accessible, and each use one model draw', () => {
+  const game = arena();
+  game.buildWorld();
+  const medical = game.loot.filter((l) => l.kind >= 3);
+  assert.ok(medical.length >= 25);
+  for (const item of medical) {
+    assert.equal(item.mesh.children[0].children.length, 1);
+    assert.equal(
+      game.blocked(item.mesh.position.x, item.mesh.position.z),
+      false,
+    );
+  }
+  game.disposeObject(game.world);
+});
+
+void test('the death sequence automatically follows the killer, including the final winner', () => {
+  const game = arena();
+  Object.assign(game, {
+    killerId: 'killer',
+    network: { playerId: 'me', send: () => {} },
+    networkRoom: {
+      phase: 'finished',
+      players: [
+        { id: 'me', health: 0 },
+        { id: 'other', name: 'Other survivor', health: 50 },
+        { id: 'killer', name: 'The killer', health: 75, shield: 30, kills: 1 },
+      ],
+    },
+  });
+  game.state.phase = 'dying';
+  game.state.health = 0;
+  game.completeDeath();
+  assert.equal(game.state.phase, 'spectating');
+  assert.equal(game.state.spectator?.id, 'killer');
+  game.networkRoom!.players[2].health = 0;
+  game.spectate();
+  assert.equal(game.state.spectator?.id, 'other');
+});
+
+void test('the parachute uses one draw and never absorbs bullets', () => {
+  const model = parachuteModel();
+  assert.equal(model.children.length, 1);
+  model.updateMatrixWorld(true);
+  const ray = new THREE.Raycaster(
+    new THREE.Vector3(0, 10, 0),
+    new THREE.Vector3(0, -1, 0),
+  );
+  assert.equal(ray.intersectObject(model, true).length, 0);
+  model.traverse((o) => {
+    if (o instanceof THREE.Mesh) {
+      o.geometry.dispose();
+      o.material.dispose();
+    }
+  });
 });

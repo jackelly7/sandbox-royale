@@ -175,7 +175,7 @@ export function FriendsRoom({
             <span
               className={p.connected ? 'connected-text' : 'disconnected-text'}
             >
-              {room.phase === 'playing'
+              {room.phase === 'playing' || room.phase === 'finished'
                 ? p.health > 0
                   ? 'ALIVE'
                   : `#${p.rank}`
@@ -232,8 +232,8 @@ export function FriendsRoom({
       )}
       {(room?.phase === 'playing' || room?.phase === 'countdown') && (
         <p className="touch-help">
-          The match is in progress. Eliminated players can stay here for the
-          next round.
+          The match is in progress. Close this panel to watch surviving players
+          from the results screen. Stay in the room for the next round.
         </p>
       )}
       <button className="text-button" onClick={leave}>

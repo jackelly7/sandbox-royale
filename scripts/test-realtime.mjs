@@ -71,7 +71,12 @@ try {
     /full/,
   );
   host.send({ type: 'start' });
-  const room = await host.until((r) => r.phase === 'playing');
+  const dropping = await host.until((r) => r.phase === 'playing');
+  assert.ok(dropping.players.every((p) => p.dropping && p.y > 20));
+  console.log('PASS all eight players begin under parachutes');
+  const room = await host.until(
+    (r) => r.phase === 'playing' && r.players.every((p) => !p.dropping),
+  );
   assert.ok(
     room.players.every((p) => p.weapon === -1 && p.owned.every((v) => !v)),
   );

@@ -1,3 +1,4 @@
+import type { RecoveryState, SupplyKind } from './rules.ts';
 export type PlayerPose = {
   x: number;
   y: number;
@@ -6,20 +7,24 @@ export type PlayerPose = {
   pitch: number;
   weapon: number;
 };
-export type Player = PlayerPose & {
-  id: string;
-  name: string;
-  health: number;
-  shield: number;
-  kills: number;
-  rank: number;
-  connected: boolean;
-  owned: boolean[];
-  ammo: number[];
-  reserve: number[];
-  reloadUntil: number;
-  shotAt: number;
-};
+export type Player = PlayerPose &
+  RecoveryState & {
+    id: string;
+    name: string;
+    health: number;
+    shield: number;
+    kills: number;
+    rank: number;
+    connected: boolean;
+    dropping: boolean;
+    killedBy: string | null;
+    diedAt: number;
+    owned: boolean[];
+    ammo: number[];
+    reserve: number[];
+    reloadUntil: number;
+    shotAt: number;
+  };
 export type RoomSnapshot = {
   code: string;
   host: string;
@@ -35,16 +40,23 @@ export type RoomSnapshot = {
 };
 export type GameEvent = {
   id: string;
-  type: 'shot' | 'hit' | 'elimination' | 'pickup';
+  type: 'shot' | 'hit' | 'elimination' | 'pickup' | 'heal';
   player: string;
   target?: string;
   end?: [number, number, number];
   at: number;
+  amount?: number;
+  shieldDamage?: number;
+  shieldBreak?: boolean;
+  headshot?: boolean;
+  item?: SupplyKind;
 };
 export type Command =
   | { type: 'pose'; pose: PlayerPose }
   | { type: 'shoot'; pose: PlayerPose; aiming: boolean }
   | { type: 'reload' }
+  | { type: 'heal'; item: SupplyKind }
+  | { type: 'cancelHeal' }
   | { type: 'pickup'; index: number }
   | { type: 'start' }
   | { type: 'rematch' }

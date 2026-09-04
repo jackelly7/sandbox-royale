@@ -5,6 +5,12 @@ import {
   stormRadius,
   takeDamage,
   reloadAmmo,
+  SUPPLY_LIMIT,
+  DROP_HEIGHT,
+  DROP_SPEED,
+  beginRecovery,
+  cancelRecovery,
+  completeRecovery,
 } from '../lib/game/rules.ts';
 import type {
   Command,
@@ -89,9 +95,16 @@ export function createMember(
     weapon: -1,
     health: 100,
     shield: 50,
+    medkits: 0,
+    cells: 0,
+    healing: null,
+    healUntil: 0,
     kills: 0,
     rank: 0,
     connected: true,
+    dropping: false,
+    killedBy: null,
+    diedAt: 0,
     owned: [false, false, false],
     ammo: [0, 0, 0],
     reserve: [0, 0, 0],
@@ -134,22 +147,31 @@ function event(room: Room, data: Omit<GameEvent, 'id'>) {
 function eliminate(room: Room, player: Member, now: number, killer?: Member) {
   if (player.rank) return;
   player.health = 0;
+  player.dropping = false;
+  player.killedBy = killer?.id ?? null;
+  player.diedAt = now;
+  cancelRecovery(player);
   player.rank = room.players.filter((p) => p.health > 0 && !p.rank).length + 1;
-  if (killer) {
-    killer.kills++;
-    event(room, {
-      type: 'elimination',
-      player: killer.id,
-      target: player.id,
-      at: now,
-    });
-  }
+  if (killer) killer.kills++;
+  event(room, {
+    type: 'elimination',
+    player: killer?.id ?? 'storm',
+    target: player.id,
+    at: now,
+  });
 }
 export function advance(room: Room, now: number) {
   const dt = Math.max(0, (now - room.tickAt) / 1000);
   room.tickAt = now;
   for (const p of room.players) {
     // Existing rooms finish with their previous loadout; new rounds start empty.
+    p.dropping ??= false;
+    p.killedBy ??= null;
+    p.diedAt ??= 0;
+    p.medkits ??= 0;
+    p.cells ??= 0;
+    p.healing ??= null;
+    p.healUntil ??= 0;
     p.owned ??= p.ammo.map((n, i) => n > 0 || p.reserve[i] > 0);
     p.connected = now - p.lastSeen < 5000;
     if (p.weapon >= 0 && p.reloadUntil && now >= p.reloadUntil) {
@@ -177,14 +199,29 @@ export function advance(room: Room, now: number) {
     radius = stormRadius(elapsed);
   for (const p of room.players) {
     if (p.health <= 0) continue;
+    if (p.dropping) {
+      p.y = Math.max(1.7, p.y - Math.min(dt, elapsed) * DROP_SPEED);
+      if (p.y <= 1.7) {
+        p.dropping = false;
+        const landing = safeLanding(p.x, p.z);
+        p.x = landing.x;
+        p.z = landing.z;
+      }
+    }
     if (now - p.lastSeen > 20000) {
       eliminate(room, p, now);
       continue;
     }
     if (Math.hypot(p.x, p.z) > radius) {
+      cancelRecovery(p);
       p.health = Math.max(0, p.health - dt * (elapsed > 180 ? 11 : 5));
       if (!p.health) eliminate(room, p, now);
     }
+  }
+  for (const p of room.players) {
+    const item = p.healing;
+    if (completeRecovery(p, now) && item)
+      event(room, { type: 'heal', player: p.id, item, at: now });
   }
   const alive = room.players.filter((p) => p.health > 0);
   if (alive.length <= 1) {
@@ -192,6 +229,17 @@ export function advance(room: Room, now: number) {
     room.winner = alive[0]?.id ?? null;
     if (alive[0]) alive[0].rank = 1;
   }
+}
+export function safeLanding(x: number, z: number) {
+  if (!blocked(x, z)) return { x, z };
+  for (let radius = 1; radius <= 24; radius++)
+    for (let i = 0; i < 16; i++) {
+      const nx = x + Math.cos((i * Math.PI) / 8) * radius,
+        nz = z + Math.sin((i * Math.PI) / 8) * radius;
+      if (Math.hypot(nx, nz) <= 109 && !blocked(nx, nz))
+        return { x: nx, z: nz };
+    }
+  return { x: 0, z: 50 };
 }
 function validPose(p: unknown): p is PlayerPose {
   if (!p || typeof p !== 'object') return false;
@@ -216,7 +264,7 @@ function move(p: Member, pose: PlayerPose, now: number) {
   if (distance <= p.credit && Math.hypot(pose.x, pose.z) <= 110.1) {
     let clear = true;
     const steps = Math.max(1, Math.ceil(distance / 0.25));
-    for (let i = 1; i <= steps; i++)
+    for (let i = 1; i <= steps && !p.dropping; i++)
       if (blocked(p.x + (dx * i) / steps, p.z + (dz * i) / steps)) {
         clear = false;
         break;
@@ -227,10 +275,11 @@ function move(p: Member, pose: PlayerPose, now: number) {
       p.credit -= distance;
     }
   }
-  p.y = Math.max(1.7, Math.min(3.05, pose.y));
+  if (!p.dropping) p.y = Math.max(1.7, Math.min(3.05, pose.y));
   p.yaw = pose.yaw % (Math.PI * 2);
   p.pitch = Math.max(-1.35, Math.min(1.35, pose.pitch));
   if (p.weapon !== pose.weapon && pose.weapon >= 0 && p.owned[pose.weapon]) {
+    cancelRecovery(p);
     p.weapon = pose.weapon;
     p.reloadUntil = 0;
   }
@@ -254,6 +303,7 @@ function rayBox(origin: number[], dir: number[], min: number[], max: number[]) {
 }
 function shoot(room: Room, p: Member, aiming: boolean, now: number) {
   if (p.weapon < 0 || !p.owned[p.weapon]) return;
+  cancelRecovery(p);
   const w = WEAPONS[p.weapon];
   if (
     p.reloadUntil ||
@@ -265,6 +315,15 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
   p.shotAt = now;
   const origin = [p.x, p.y, p.z];
   let end: [number, number, number] = [p.x, p.y, p.z];
+  const hits = new Map<
+    string,
+    {
+      amount: number;
+      shieldDamage: number;
+      shieldBreak: boolean;
+      headshot: boolean;
+    }
+  >();
   for (let n = 0; n < w.pellets; n++) {
     const spread = w.spread * (aiming ? 0.3 : 1),
       yaw = p.yaw + (Math.random() - 0.5) * spread,
@@ -301,6 +360,9 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
     ];
     if (target) {
       const headshot = end[1] - (target.y - 1.7) > 1.72;
+      const oldHealth = target.health,
+        oldShield = target.shield;
+      cancelRecovery(target);
       Object.assign(
         target,
         takeDamage(
@@ -309,10 +371,22 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
           w.damage * (headshot ? 1.65 : 1),
         ),
       );
-      event(room, { type: 'hit', player: p.id, target: target.id, at: now });
+      const hit = hits.get(target.id) ?? {
+        amount: 0,
+        shieldDamage: 0,
+        shieldBreak: false,
+        headshot: false,
+      };
+      hit.amount += oldHealth + oldShield - target.health - target.shield;
+      hit.shieldDamage += oldShield - target.shield;
+      hit.shieldBreak ||= oldShield > 0 && target.shield === 0;
+      hit.headshot ||= headshot;
+      hits.set(target.id, hit);
       if (target.health <= 0) eliminate(room, target, now, p);
     }
   }
+  for (const [target, hit] of hits)
+    event(room, { type: 'hit', player: p.id, target, ...hit, at: now });
   event(room, { type: 'shot', player: p.id, end, at: now });
 }
 export function applyCommand(
@@ -358,6 +432,8 @@ export function applyCommand(
       Object.assign(member, {
         ...createMember(member.id, member.name, member.tokenHash, now),
         ...safeSpawn(i, room.players.length),
+        y: DROP_HEIGHT,
+        dropping: true,
       });
       member.yaw = Math.atan2(member.x, member.z);
     });
@@ -374,6 +450,10 @@ export function applyCommand(
   }
   if (command.type === 'ping') return;
   if (room.phase !== 'playing' || p.health <= 0) return;
+  if (p.dropping && command.type !== 'pose') return;
+  if (command.type === 'cancelHeal') cancelRecovery(p);
+  if (command.type === 'heal' && beginRecovery(p, command.item, now))
+    p.reloadUntil = 0;
   if (command.type === 'pose' || command.type === 'shoot')
     move(p, command.pose, now);
   if (command.type === 'shoot') shoot(room, p, command.aiming, now);
@@ -384,8 +464,10 @@ export function applyCommand(
     !p.reloadUntil &&
     p.ammo[p.weapon] < WEAPONS[p.weapon].capacity &&
     p.reserve[p.weapon] > 0
-  )
+  ) {
+    cancelRecovery(p);
     p.reloadUntil = now + WEAPONS[p.weapon].reload * 1000;
+  }
   if (command.type === 'pickup') {
     if (!Number.isInteger(command.index)) return;
     const l = MAP.loot[command.index];
@@ -399,12 +481,16 @@ export function applyCommand(
       if (!p.owned[l.kind]) {
         p.owned[l.kind] = true;
         p.ammo[l.kind] = WEAPONS[l.kind].capacity;
+        cancelRecovery(p);
         p.weapon = l.kind;
         p.reloadUntil = 0;
       }
       p.reserve[l.kind] += WEAPONS[l.kind].capacity * 2;
-    } else if (l.kind === 3) p.shield = Math.min(100, p.shield + 50);
-    else p.health = Math.min(100, p.health + 45);
+    } else {
+      const slot = l.kind === 3 ? 'cells' : 'medkits';
+      if (p[slot] >= SUPPLY_LIMIT) return;
+      p[slot]++;
+    }
     room.loot[command.index] = true;
     event(room, { type: 'pickup', player: p.id, at: now });
   }
@@ -439,13 +525,19 @@ export function parseCommand(value: unknown): Command {
   if (!value || typeof value !== 'object')
     throw new GameError('Invalid message.');
   const c = value as Command;
-  if (['ping', 'reload', 'leave', 'start', 'rematch'].includes(c.type))
+  if (
+    ['ping', 'reload', 'leave', 'start', 'rematch', 'cancelHeal'].includes(
+      c.type,
+    )
+  )
     return { type: c.type } as Command;
   if ((c.type === 'pose' || c.type === 'shoot') && validPose(c.pose)) {
     return c.type === 'pose'
       ? { type: 'pose', pose: c.pose }
       : { type: 'shoot', pose: c.pose, aiming: c.aiming === true };
   }
+  if (c.type === 'heal' && (c.item === 'medkit' || c.item === 'shield'))
+    return { type: 'heal', item: c.item };
   if (c.type === 'pickup' && Number.isInteger(c.index))
     return { type: 'pickup', index: c.index };
   throw new GameError('Invalid message.');

@@ -62,3 +62,67 @@ export function reloadAmmo(ammo: number, reserve: number, capacity: number) {
   const loaded = Math.min(Math.max(0, capacity - ammo), reserve);
   return { ammo: ammo + loaded, reserve: reserve - loaded };
 }
+
+export type SupplyKind = 'medkit' | 'shield';
+export type RecoveryState = {
+  health: number;
+  shield: number;
+  medkits: number;
+  cells: number;
+  healing: SupplyKind | null;
+  healUntil: number;
+};
+export const SUPPLIES = {
+  medkit: {
+    name: 'Medkit',
+    amount: 75,
+    seconds: 4,
+    slot: 'medkits',
+    stat: 'health',
+  },
+  shield: {
+    name: 'Shield cell',
+    amount: 50,
+    seconds: 2.5,
+    slot: 'cells',
+    stat: 'shield',
+  },
+} as const;
+export const SUPPLY_LIMIT = 3;
+export function beginRecovery(
+  state: RecoveryState,
+  item: SupplyKind,
+  now: number,
+) {
+  const supply = SUPPLIES[item];
+  if (
+    state.healing ||
+    state.health <= 0 ||
+    state[supply.stat] >= 100 ||
+    state[supply.slot] <= 0
+  )
+    return false;
+  state.healing = item;
+  state.healUntil = now + supply.seconds * 1000;
+  return true;
+}
+export function cancelRecovery(state: RecoveryState) {
+  state.healing = null;
+  state.healUntil = 0;
+}
+export function completeRecovery(state: RecoveryState, now: number) {
+  if (!state.healing || now < state.healUntil || state.health <= 0)
+    return false;
+  const supply = SUPPLIES[state.healing];
+  if (state[supply.slot] <= 0) {
+    cancelRecovery(state);
+    return false;
+  }
+  state[supply.slot]--;
+  state[supply.stat] = Math.min(100, state[supply.stat] + supply.amount);
+  cancelRecovery(state);
+  return true;
+}
+
+export const DROP_HEIGHT = 42;
+export const DROP_SPEED = 6;
