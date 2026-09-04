@@ -63,7 +63,11 @@ export function FriendsRoom({
           onChange={(e) => setName(e.target.value)}
           maxLength={18}
           placeholder="Choose a callsign"
-          autoComplete="nickname"
+          autoComplete="off"
+          spellCheck={false}
+          data-bwignore="true"
+          data-1p-ignore="true"
+          data-lpignore="true"
           className="room-input"
         />
         <button
@@ -77,7 +81,8 @@ export function FriendsRoom({
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (name.trim() && code.trim().length === 6) enter(name, code);
+            if (!busy && name.trim() && code.trim().length === 6)
+              enter(name, code);
           }}
         >
           <label htmlFor="room-code">Room code</label>
@@ -96,6 +101,11 @@ export function FriendsRoom({
               maxLength={6}
               placeholder="ABC234"
               autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              data-bwignore="true"
+              data-1p-ignore="true"
+              data-lpignore="true"
               className="room-input code-input"
             />
             <button

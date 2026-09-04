@@ -127,6 +127,7 @@ export class BattleGame {
   cleanup: (() => void)[] = [];
   tracers: { mesh: THREE.Line; life: number }[] = [];
   destroyed = false;
+  menuOpen = false;
   onState: (state: GameState) => void;
   network: { playerId: string; send: (command: Command) => void } | null = null;
   networkRoom: RoomSnapshot | null = null;
@@ -142,7 +143,6 @@ export class BattleGame {
       antialias: true,
       powerPreference: 'high-performance',
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -165,7 +165,7 @@ export class BattleGame {
       near: 1,
       far: 300,
     });
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.bias = -0.0008;
     this.scene.add(sun);
     this.buildWorld();
@@ -677,9 +677,21 @@ export class BattleGame {
   }
   resize() {
     const { clientWidth: w, clientHeight: h } = this.container;
+    // Keep Retina and large displays from multiplying the full-screen GPU work.
+    this.renderer.setPixelRatio(
+      Math.min(
+        window.devicePixelRatio,
+        1.5,
+        Math.sqrt((1920 * 1080) / Math.max(1, w * h)),
+      ),
+    );
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
+  }
+  setMenuOpen(open: boolean) {
+    this.menuOpen = open;
+    if (open && this.state.phase === 'playing') this.pause();
   }
   async start(touch = false) {
     if (this.state.phase !== 'paused' && !this.network) {
@@ -1037,8 +1049,21 @@ export class BattleGame {
       }
     }
   }
-  tick = (now: number) => {
+  tick = (now: number) => this.updateFrame(now);
+  updateFrame(now: number) {
     if (this.destroyed) return;
+    // Leave the last island frame behind forms. Rendering shadows and applying
+    // backdrop blur every frame competes with typing on integrated GPUs.
+    if (this.menuOpen || document.hidden) {
+      this.previous = now;
+      this.frame = requestAnimationFrame(this.tick);
+      return;
+    }
+    const interval = this.state.phase === 'playing' ? 1000 / 60 : 1000 / 24;
+    if (now - this.previous < interval) {
+      this.frame = requestAnimationFrame(this.tick);
+      return;
+    }
     const dt = Math.min((now - this.previous) / 1000 || 0, 0.04);
     this.previous = now;
     this.time += dt;
@@ -1196,7 +1221,7 @@ export class BattleGame {
     }
     this.renderer.render(this.scene, this.camera);
     this.frame = requestAnimationFrame(this.tick);
-  };
+  }
   emit() {
     this.state.ammo = this.weaponAmmo[this.state.weapon];
     this.state.reserve = this.reserveAmmo[this.state.weapon];

@@ -110,3 +110,63 @@ void test('island spawn and supplies are accessible outside solid buildings', ()
   assert.ok(game.colliders.length > 25);
   game.disposeObject(game.scene);
 });
+
+void test('room forms stop GPU rendering while the animation loop stays resumable', (t) => {
+  const originalDocument = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'document',
+  );
+  const originalFrame = Object.getOwnPropertyDescriptor(
+    globalThis,
+    'requestAnimationFrame',
+  );
+  let hidden = false;
+  let renders = 0;
+  let scheduled: FrameRequestCallback | undefined;
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      get hidden() {
+        return hidden;
+      },
+    },
+  });
+  Object.defineProperty(globalThis, 'requestAnimationFrame', {
+    configurable: true,
+    value: (callback: FrameRequestCallback) => {
+      scheduled = callback;
+      return 1;
+    },
+  });
+  t.after(() => {
+    if (originalDocument)
+      Object.defineProperty(globalThis, 'document', originalDocument);
+    else Reflect.deleteProperty(globalThis, 'document');
+    if (originalFrame)
+      Object.defineProperty(globalThis, 'requestAnimationFrame', originalFrame);
+    else Reflect.deleteProperty(globalThis, 'requestAnimationFrame');
+  });
+  const game = arena();
+  Object.assign(game, {
+    renderer: {
+      render: () => {
+        renders++;
+      },
+    },
+    previous: 0,
+    time: 0,
+    uiTime: 0,
+  });
+  game.tick = (now) => game.updateFrame(now);
+  game.state.phase = 'paused';
+  game.setMenuOpen(true);
+  for (let frame = 1; frame <= 120; frame++) game.tick(frame * 17);
+  assert.equal(renders, 0, 'Typing in a room must not submit any GPU frames');
+  assert.equal(scheduled, game.tick, 'The loop remains scheduled for resuming');
+  game.setMenuOpen(false);
+  game.tick(2100);
+  assert.equal(renders, 1, 'Closing the form resumes graphics');
+  hidden = true;
+  game.tick(2200);
+  assert.equal(renders, 1, 'Background tabs must not render');
+});

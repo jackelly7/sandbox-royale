@@ -228,6 +228,9 @@ export default function Home() {
     [roomError, setRoomError] = useState(''),
     [inviteCode, setInviteCode] = useState('');
   const roomPhase = useRef('waiting');
+  useEffect(() => {
+    game.current?.setMenuOpen(panel !== null);
+  }, [panel, ready]);
   const leaveRoom = () => {
     client.current?.close();
     client.current = null;

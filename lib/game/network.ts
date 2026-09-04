@@ -6,6 +6,34 @@ import type {
   RoomSnapshot,
   PlayerPose,
 } from './multiplayer.ts';
+
+async function requestRoom(body: unknown, timeout: number) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(MULTIPLAYER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!response.headers.get('content-type')?.includes('application/json'))
+      throw new Error(
+        'The room service did not respond. Please try joining again.',
+      );
+    const data = await response.json();
+    return { response, data };
+  } catch (error) {
+    if (controller.signal.aborted)
+      throw new Error(
+        'Connection timed out. Check your internet connection and try again.',
+      );
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class MultiplayerClient {
   session: RoomSession;
   onRoom: (room: RoomSnapshot, acknowledgedPose?: PlayerPose) => void;
@@ -13,6 +41,7 @@ export class MultiplayerClient {
   onError: (message: string) => void;
   closed = false;
   retry = 0;
+  receivedRoom = false;
   sequence = 0;
   sentPoses = new Map<number, PlayerPose>();
   timer: ReturnType<typeof setTimeout> | null = null;
@@ -32,19 +61,21 @@ export class MultiplayerClient {
     void this.sync();
   }
   static async enter(name: string, code?: string) {
-    const response = await fetch(MULTIPLAYER_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    const { response, data: value } = await requestRoom(
+      {
         type: code ? 'join' : 'create',
         name,
         code: code?.trim().toUpperCase(),
-      }),
-      signal: AbortSignal.timeout(20000),
-    });
-    const data = (await response.json()) as RoomSession & { error?: string };
+      },
+      12000,
+    );
+    const data = value as Partial<RoomSession> & { error?: string };
+    if (!data || typeof data !== 'object')
+      throw new Error('Could not join the room. Please try again.');
     if (!response.ok) throw new Error(data.error || 'Could not join the room.');
-    return data;
+    if (!data.code || !data.playerId || !data.token)
+      throw new Error('Could not join the room. Please try again.');
+    return data as RoomSession;
   }
   async sync() {
     if (this.closed) return;
@@ -62,13 +93,11 @@ export class MultiplayerClient {
     if (this.sentPoses.size > 256)
       this.sentPoses.delete(this.sentPoses.keys().next().value!);
     try {
-      const response = await fetch(MULTIPLAYER_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'sync', ...this.session, actions }),
-        signal: AbortSignal.timeout(8000),
-      });
-      const result = (await response.json()) as {
+      const { response, data } = await requestRoom(
+        { type: 'sync', ...this.session, actions },
+        8000,
+      );
+      const result = data as {
         room: RoomSnapshot;
         ack: number;
         error?: string;
@@ -90,12 +119,20 @@ export class MultiplayerClient {
       for (const [seq] of acknowledged) this.sentPoses.delete(seq);
       this.pending = this.pending.filter((a) => a.seq > result.ack);
       this.retry = 0;
+      this.receivedRoom = true;
       this.onStatus('connected');
       if (result.error) this.onError(result.error);
       this.onRoom(result.room, acknowledgedPose);
     } catch (e) {
       if (this.closed) return;
       this.retry++;
+      if (!this.receivedRoom && this.retry >= 3) {
+        this.onError(
+          'Could not load this room. Leave the room and try joining again.',
+        );
+        this.close();
+        return;
+      }
       this.onStatus('reconnecting');
       if (this.retry === 3)
         this.onError(
