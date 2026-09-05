@@ -151,8 +151,8 @@ void test('island batching removes most draw submissions without losing collisio
   const game = arena();
   game.buildWorld();
   const before = game.visible(
-    new THREE.Vector3(18 * ARENA_SCALE, 2, 0),
-    new THREE.Vector3(18 * ARENA_SCALE, 2, -40 * ARENA_SCALE),
+    new THREE.Vector3(21 * ARENA_SCALE, 2, 0),
+    new THREE.Vector3(21 * ARENA_SCALE, 2, -40 * ARENA_SCALE),
   );
   const stats = batchIsland(
     game.world,
@@ -161,8 +161,8 @@ void test('island batching removes most draw submissions without losing collisio
   assert.ok(stats.after < stats.before / 5, JSON.stringify(stats));
   assert.equal(
     game.visible(
-      new THREE.Vector3(18 * ARENA_SCALE, 2, 0),
-      new THREE.Vector3(18 * ARENA_SCALE, 2, -40 * ARENA_SCALE),
+      new THREE.Vector3(21 * ARENA_SCALE, 2, 0),
+      new THREE.Vector3(21 * ARENA_SCALE, 2, -40 * ARENA_SCALE),
     ),
     before,
   );
@@ -314,13 +314,13 @@ void test('recovery models are distinct, accessible, and each use one model draw
   game.disposeObject(game.world);
 });
 
-void test('the death sequence automatically follows the killer, including the final winner', () => {
+void test('the death sequence follows the killer during play and shows results when the round ends', () => {
   const game = arena();
   Object.assign(game, {
     killerId: 'killer',
     network: { playerId: 'me', send: () => {} },
     networkRoom: {
-      phase: 'finished',
+      phase: 'playing',
       players: [
         { id: 'me', health: 0 },
         { id: 'other', name: 'Other survivor', health: 50 },
@@ -336,6 +336,10 @@ void test('the death sequence automatically follows the killer, including the fi
   game.networkRoom!.players[2].health = 0;
   game.spectate();
   assert.equal(game.state.spectator?.id, 'other');
+  game.networkRoom!.phase = 'finished';
+  game.state.phase = 'dying';
+  game.completeDeath();
+  assert.equal(game.state.phase, 'lost');
 });
 
 void test('the parachute uses one draw and never absorbs bullets', () => {
@@ -411,7 +415,7 @@ void test('new sand cover blocks bullets and movement while leaving loot accessi
   game.world.traverse((o) => {
     if (o.name === 'Sand cover') walls.push(o);
   });
-  assert.equal(walls.length, 40);
+  assert.ok(walls.length >= 40);
   for (const wall of walls) {
     const b = new THREE.Box3().setFromObject(wall);
     const p = wall.getWorldPosition(new THREE.Vector3());

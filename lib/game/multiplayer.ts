@@ -1,3 +1,4 @@
+import type { ChestState } from './chests.ts';
 import type { WorldDrop } from './loot.ts';
 import type { Point } from './movement.ts';
 import type { Zone } from './zones.ts';
@@ -21,6 +22,7 @@ export type Player = PlayerPose &
     kills: number;
     rank: number;
     connected: boolean;
+    ready?: boolean;
     dropping: boolean;
     killedBy: string | null;
     diedAt: number;
@@ -56,6 +58,7 @@ export type RoomSnapshot = {
   players: Player[];
   loot: boolean[];
   drops?: WorldDrop[];
+  chests?: ChestState[];
   events: GameEvent[];
   mode?: 'solo' | 'duos';
   winningTeam?: number | null;
@@ -63,6 +66,7 @@ export type RoomSnapshot = {
 export type GameEvent = {
   id: string;
   type:
+    | 'chest'
     | 'shot'
     | 'melee'
     | 'hit'
@@ -92,6 +96,8 @@ export type Command =
   | { type: 'heal'; item: SupplyKind }
   | { type: 'cancelHeal' }
   | { type: 'pickup'; index: number }
+  | { type: 'chest'; index: number }
+  | { type: 'ready' }
   | { type: 'start' }
   | { type: 'rematch' }
   | { type: 'leave' }

@@ -1,9 +1,9 @@
 import { zoneAt } from './zones.ts';
 export const RARITIES = [
   { name: 'Common', color: '#c9d0d5', power: 1 },
-  { name: 'Rare', color: '#59adff', power: 1.1 },
-  { name: 'Epic', color: '#bb85ff', power: 1.2 },
-  { name: 'Legendary', color: '#ffc34d', power: 1.3 },
+  { name: 'Rare', color: '#258dff', power: 1.1 },
+  { name: 'Epic', color: '#b349ff', power: 1.2 },
+  { name: 'Legendary', color: '#ffb51b', power: 1.3 },
 ];
 export const WEAPONS = [
   {

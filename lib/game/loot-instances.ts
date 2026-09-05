@@ -18,7 +18,7 @@ export class LootInstances {
     for (const drop of drops)
       for (let part = 0; part < 3; part++) {
         const p = drop.mesh.position;
-        const key = `${p.x < 0 ? 0 : 1}:${p.z < 0 ? 0 : 1}:${part}:${part === 0 ? `${drop.kind}:${drop.rarity ?? 0}` : 'all'}`;
+        const key = `${part === 0 ? 'models' : `${p.x < 0 ? 0 : 1}:${p.z < 0 ? 0 : 1}`}:${part}:${part === 0 ? `${drop.kind}:${drop.rarity ?? 0}` : 'all'}`;
         const entries = groups.get(key) ?? [];
         entries.push({ drop, part });
         groups.set(key, entries);
@@ -40,8 +40,9 @@ export class LootInstances {
           ? (source.material as THREE.Material).clone()
           : new THREE.MeshBasicMaterial({
               color: '#ffffff',
+              toneMapped: false,
               transparent: true,
-              opacity: part === 1 ? 0.32 : 0.14,
+              opacity: part === 1 ? 0.85 : 0.3,
               depthWrite: false,
             });
       const mesh = new THREE.InstancedMesh(geometry, material, entries.length);

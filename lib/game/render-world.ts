@@ -18,7 +18,8 @@ export function batchIsland(
     if (
       !(object instanceof THREE.Mesh) ||
       object instanceof THREE.InstancedMesh ||
-      excluded.has(object)
+      excluded.has(object) ||
+      object.userData.dynamic
     )
       return;
     if (!(object.material instanceof THREE.MeshStandardMaterial)) return;

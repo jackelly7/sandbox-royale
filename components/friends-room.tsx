@@ -287,12 +287,19 @@ export function FriendsRoom({
           </div>
           <button
             className="deploy-button"
-            disabled={!isHost || status !== 'connected'}
-            onClick={() => command({ type: 'rematch' })}
+            disabled={status !== 'connected'}
+            onClick={() => command({ type: 'ready' })}
           >
-            {isHost ? 'PREPARE REMATCH' : 'WAITING FOR HOST'}
+            {room.players.find((p) => p.id === session?.playerId)?.ready
+              ? 'READY · CLICK TO CANCEL'
+              : 'READY FOR NEXT DROP'}
             <ArrowRight size={22} />
           </button>
+          <p className="touch-help">
+            {room.players.filter((p) => p.connected && p.ready).length}/
+            {room.players.filter((p) => p.connected).length} ready. The next
+            drop starts when everyone is ready.
+          </p>
         </>
       )}
       {(room?.phase === 'playing' || room?.phase === 'countdown') && (

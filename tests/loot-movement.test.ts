@@ -35,12 +35,12 @@ const setup = () => {
   r.tickAt = 1000;
   return r;
 };
-void test('ground loot adds eight pickups while retaining one or two weapons per landing sector', () => {
-  assert.equal(MAP.loot.filter((_, i) => floorAvailable(i)).length, 47);
+void test('chests replace sixteen floor pickups while retaining a weapon per landing sector', () => {
+  assert.equal(MAP.loot.filter((_, i) => floorAvailable(i)).length, 31);
   for (let i = 0; i < 8; i++)
     assert.equal(
       [0, 1, 2].filter((k) => floorAvailable(19 + i * 3 + k)).length,
-      i % 2 === 0 ? 2 : 1,
+      1,
     );
   const rarities = new Set(
     MAP.loot.flatMap((l, i) =>

@@ -1,3 +1,10 @@
+import {
+  CHEST_SPOTS,
+  chestLayout,
+  chestDrops,
+  canReach,
+  type ChestState,
+} from '../lib/game/chests.ts';
 import { ARENA_RADIUS, ARENA_SCALE, SPAWN_RADIUS } from '../lib/game/arena.ts';
 import { MELEE, meleeTarget, meleeBody } from '../lib/game/melee.ts';
 import {
@@ -61,6 +68,7 @@ export type Room = {
   players: Member[];
   loot: boolean[];
   drops?: WorldDrop[];
+  chests?: ChestState[];
   zonePlayers?: number;
   events: GameEvent[];
   marks?: GameEvent[];
@@ -84,6 +92,8 @@ export function cleanName(value: unknown) {
 export function blocked(x: number, z: number) {
   return MAP.colliders.some(
     (b) =>
+      b.min[1] < 1.8 &&
+      b.max[1] > 0.08 &&
       x > b.min[0] - 0.48 &&
       x < b.max[0] + 0.48 &&
       z > b.min[2] - 0.48 &&
@@ -127,6 +137,7 @@ export function createMember(
     kills: 0,
     rank: 0,
     connected: true,
+    ready: false,
     dropping: false,
     killedBy: null,
     diedAt: 0,
@@ -307,6 +318,16 @@ export function advance(room: Room, now: number) {
     if (!room.players.find((p) => p.id === room.host)?.connected) {
       const next = room.players.find((p) => p.connected);
       if (next) room.host = next.id;
+    }
+    const connected = room.players.filter((p) => p.connected);
+    if (
+      room.phase === 'finished' &&
+      connected.length >= 2 &&
+      connected.every((p) => p.ready) &&
+      (room.mode !== 'duos' || new Set(connected.map((p) => p.team)).size >= 2)
+    ) {
+      room.phase = 'waiting';
+      applyCommand(room, room.host, { type: 'start' }, now);
     }
     return;
   }
@@ -714,6 +735,7 @@ export function applyCommand(
     room.winningTeam = null;
     room.loot = MAP.loot.map((_, i) => !floorAvailable(i));
     room.drops = [];
+    room.chests = chestLayout(`${room.code}:${room.round}`);
     room.zonePlayers = connected.length;
     room.events = [];
     room.marks = [];
@@ -740,6 +762,20 @@ export function applyCommand(
         member.x += 2;
       member.yaw = Math.atan2(member.x, member.z);
     });
+    return;
+  }
+  if (command.type === 'ready') {
+    if (room.phase !== 'finished') return;
+    p.ready = !p.ready;
+    const connected = room.players.filter((q) => q.connected);
+    if (
+      connected.length >= 2 &&
+      connected.every((q) => q.ready) &&
+      (room.mode !== 'duos' || new Set(connected.map((q) => q.team)).size >= 2)
+    ) {
+      room.phase = 'waiting';
+      applyCommand(room, room.host, { type: 'start' }, now);
+    }
     return;
   }
   if (command.type === 'rematch') {
@@ -836,6 +872,28 @@ export function applyCommand(
     cancelRecovery(p);
     p.reloadUntil = now + WEAPONS[p.weapon].reload * 1000;
   }
+  if (command.type === 'chest') {
+    const chest = room.chests?.[command.index],
+      spot = CHEST_SPOTS[command.index];
+    if (
+      !chest?.active ||
+      chest.openedAt ||
+      !spot ||
+      !canReach(p, { ...spot, y: 0.8 }, MAP.colliders)
+    )
+      return;
+    chest.openedAt = now;
+    room.drops ??= [];
+    for (const drop of chestDrops(`${room.code}:${room.round}`, command.index))
+      room.drops.push({ ...drop, ...safeLanding(drop.x, drop.z) });
+    stopRevive(p);
+    event(room, {
+      type: 'chest',
+      player: p.id,
+      at: now,
+      end: [spot.x, 0.8, spot.z],
+    });
+  }
   if (command.type === 'pickup') {
     if (!Number.isInteger(command.index)) return;
     const floor = command.index < MAP.loot.length;
@@ -845,7 +903,7 @@ export function applyCommand(
     if (
       !l ||
       (floor ? room.loot[command.index] : (l as WorldDrop).used) ||
-      Math.hypot(l.x - p.x, l.z - p.z) > 3.8
+      !canReach(p, { x: l.x, y: 0.85, z: l.z }, MAP.colliders)
     )
       return;
     const drop = floor
@@ -905,6 +963,7 @@ export function snapshot(room: Room, now: number): RoomSnapshot {
     ),
     loot: room.loot,
     drops: room.drops ?? [],
+    chests: room.chests ?? [],
     events: [
       ...room.events.filter((e) => now - e.at < 1500),
       ...(room.marks ?? []).filter((e) => now - e.at < 8000),
@@ -922,6 +981,7 @@ export function parseCommand(value: unknown): Command {
       'leave',
       'start',
       'rematch',
+      'ready',
       'cancelHeal',
       'cancelRevive',
     ].includes(c.type)
@@ -965,6 +1025,13 @@ export function parseCommand(value: unknown): Command {
   }
   if (c.type === 'heal' && (c.item === 'medkit' || c.item === 'shield'))
     return { type: 'heal', item: c.item };
+  if (
+    c.type === 'chest' &&
+    Number.isInteger(c.index) &&
+    c.index >= 0 &&
+    c.index < CHEST_SPOTS.length
+  )
+    return { type: 'chest', index: c.index };
   if (c.type === 'pickup' && Number.isInteger(c.index))
     return { type: 'pickup', index: c.index };
   throw new GameError('Invalid message.');

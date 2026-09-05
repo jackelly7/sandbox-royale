@@ -3472,3 +3472,82 @@ kbd {
     animation: none;
   }
 }
+
+.result-overlay {
+  background: #101010d9;
+  animation: results-reveal 0.35s ease-out both;
+}
+.result-panel {
+  width: min(100%, 540px);
+  animation: results-rise 0.45s ease-out both;
+}
+.result-context {
+  color: #b9c4bf;
+  font-size: 14px;
+  margin: 12px 0 20px;
+}
+.result-stats {
+  padding: 20px 0;
+  border-top: 1px solid #ffffff26;
+  border-bottom: 1px solid #ffffff26;
+}
+.result-stats span {
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+.result-panel .scoreboard {
+  max-height: 240px;
+  overflow-y: auto;
+}
+.rematch-ready .deploy-button {
+  width: 100%;
+  font-size: clamp(18px, 4vw, 25px);
+}
+.rematch-ready .ready-status {
+  display: block;
+  margin: 12px 0;
+  font-size: 14px;
+  color: #c4ccc7;
+}
+.ready-players {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 20px 0 14px;
+}
+.ready-players span {
+  padding: 6px 10px;
+  border: 1px solid #ffffff2e;
+  font-size: 14px;
+  color: #b9c4bf;
+}
+.ready-players .is-ready {
+  color: #a7e3cd;
+  border-color: #a7e3cd;
+  background: #a7e3cd14;
+}
+@keyframes results-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes results-rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .result-overlay,
+  .result-panel {
+    animation: none;
+  }
+}

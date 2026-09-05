@@ -1,4 +1,12 @@
 import {
+  CHEST_SPOTS,
+  chestLayout,
+  chestDrops,
+  canReach,
+  type ChestState,
+} from './chests.ts';
+import { ChestInstances } from './chest-model.ts';
+import {
   ARENA_SCALE,
   ARENA_RADIUS,
   INITIAL_CIRCLE,
@@ -264,6 +272,10 @@ export class BattleGame {
   zoneCue = '';
   bots: Bot[] = [];
   loot: Loot[] = [];
+  chests: ChestState[] = [];
+  chestRenderer?: ChestInstances;
+  chestSeed = 'sandbox';
+  chestHumAt = 0;
   colliders: THREE.Box3[] = [];
   solids: THREE.Object3D[] = [];
   storm!: THREE.Mesh;
@@ -572,8 +584,8 @@ export class BattleGame {
         );
       this.box(2.2, 1, 2, '#e2dfc0', x + w * 0.2, h + 0.8, z - 1);
     };
-    building(18, -23, 14, 12, 7.5, '#e5bd75');
-    building(-22, -16, 14, 12, 6, '#e2c884');
+    this.buildCastle(18, -23, '#e5bd75');
+    this.buildCastle(-22, -16, '#e2c884');
     building(30, 20, 12, 10, 5.7, '#65b5c5');
     building(-35, 28, 12, 10, 6.6, '#e7bc70');
     building(2, -57, 12, 9, 5, '#e0b365');
@@ -583,15 +595,15 @@ export class BattleGame {
     building(49, 45, 9, 10, 4.5, '#dc7861');
     building(-56, 7, 11, 9, 5.4, '#669f9b');
     // A stepped clock tower gives the island its silhouette.
-    const tower = this.box(7, 17, 7, '#ebc993', 18, 8.5, -23);
+    const tower = this.box(7, 17, 7, '#ebc993', 13, 8.5, -27);
     this.solid(tower);
-    this.box(8.2, 0.7, 8.2, '#f5e7c0', 18, 16.8, -23);
-    this.box(6, 4, 6, '#d5a271', 18, 19, -23);
+    this.box(8.2, 0.7, 8.2, '#f5e7c0', 13, 16.8, -27);
+    this.box(6, 4, 6, '#d5a271', 13, 19, -27);
     const roof = new THREE.Mesh(
       new THREE.ConeGeometry(5.3, 3, 4),
       this.material('#dfb064'),
     );
-    roof.position.set(18, 22.2, -23);
+    roof.position.set(13, 22.2, -27);
     roof.rotation.y = Math.PI / 4;
     roof.castShadow = true;
     this.world.add(roof);
@@ -599,12 +611,12 @@ export class BattleGame {
       new THREE.CircleGeometry(1.3, 24),
       this.material('#f9edcd'),
     );
-    clock.position.set(18, 18.9, -19.98);
+    clock.position.set(13, 18.9, -23.98);
     this.world.add(clock);
-    this.box(0.12, 0.9, 0.08, '#3b5b60', 18, 19.2, -19.9);
-    this.box(0.75, 0.12, 0.08, '#3b5b60', 18.3, 18.9, -19.9);
-    this.box(0.15, 5, 0.15, '#d7d6b7', 18, 25, -23);
-    const flag = this.box(2.5, 1.25, 0.07, '#ed744e', 19.2, 26.7, -23);
+    this.box(0.12, 0.9, 0.08, '#3b5b60', 13, 19.2, -23.9);
+    this.box(0.75, 0.12, 0.08, '#3b5b60', 13.3, 18.9, -23.9);
+    this.box(0.15, 5, 0.15, '#d7d6b7', 13, 25, -27);
+    const flag = this.box(2.5, 1.25, 0.07, '#ed744e', 14.2, 26.7, -27);
     flag.rotation.y = 0.15;
     // Utility poles and bunting through the central street.
     for (let i = 0; i < 4; i++) {
@@ -741,7 +753,97 @@ export class BattleGame {
       item.mesh.position.z *= ARENA_SCALE;
     }
     this.rebuildLoot();
+    this.resetChests('sandbox');
     this.world.updateMatrixWorld(true);
+  }
+  buildCastle(x: number, z: number, color: string) {
+    const wall = (
+      w: number,
+      h: number,
+      d: number,
+      dx: number,
+      y: number,
+      dz: number,
+    ) => {
+      const mesh = this.box(w, h, d, color, x + dx, y, z + dz);
+      mesh.name = 'Sandcastle wall';
+      this.solid(mesh);
+    };
+    // Four wide doorways and a shaded hall. Roof and walls have separate collision.
+    for (const side of [-1, 1]) {
+      for (const part of [-1, 1]) {
+        wall(5, 6, 0.7, part * 4.5, 3, side * 6);
+        wall(0.7, 6, 4, side * 7, 3, part * 4);
+      }
+      wall(4, 2.2, 0.7, 0, 4.9, side * 6);
+      wall(0.7, 2.2, 4, side * 7, 4.9, 0);
+    }
+    wall(14.7, 0.35, 12.7, 0, 6.175, 0);
+    // Broad, two-metre ledges lead up to the roof using the existing mantle.
+    for (let i = 0; i < 3; i++) {
+      const h = (i + 1) * 2;
+      wall(2.7, h, 3, 8.7, h / 2, 8 - i * 3);
+      this.box(2.8, 0.12, 3.1, '#f4deaa', x + 8.7, h + 0.02, z + 8 - i * 3);
+    }
+    for (const side of [-1, 1])
+      for (const n of [-2, -1, 0, 1, 2]) {
+        wall(1.5, 0.9, 0.8, n * 3, 6.8, side * 6);
+      }
+    this.box(3.6, 0.035, 12, '#b9985e', x, 0.025, z);
+    // Low partitions break sightlines while leaving two routes around the chest.
+    wall(3, 2.2, 0.65, 3.8, 1.1, 1.7);
+    this.box(0.12, 4, 0.12, '#7a6245', x - 5, 8.4, z + 4);
+    this.box(2, 1, 0.08, '#a7e3cd', x - 4, 9.7, z + 4);
+  }
+  resetChests(seed: string) {
+    if (this.chestRenderer) {
+      this.chestRenderer.root.removeFromParent();
+      this.disposeObject(this.chestRenderer.root);
+    }
+    this.chestSeed = seed;
+    this.chests = chestLayout(seed);
+    this.chestRenderer = new ChestInstances(this.chests);
+    this.chestRenderer.update(this.chests, 1);
+    this.world.add(this.chestRenderer.root);
+  }
+
+  nearestChest(position = this.position) {
+    return (this.chests ?? []).findIndex(
+      (c, i) =>
+        c.active &&
+        !c.openedAt &&
+        canReach(position, { ...CHEST_SPOTS[i], y: 0.8 }, this.physicsBounds()),
+    );
+  }
+  openChest(index: number) {
+    const c = this.chests?.[index];
+    if (!c?.active || c.openedAt) return;
+    c.openedAt = Math.max(0.001, this.time);
+    for (const drop of chestDrops(this.chestSeed, index)) this.addLoot(drop);
+    this.rebuildLoot();
+    this.sound(740, 0.24, 0.045, 'triangle');
+  }
+  updateChests(dt: number) {
+    this.chestRenderer?.update(this.chests, dt);
+    if (
+      this.state.phase !== 'playing' ||
+      this.state.dropping ||
+      this.time < (this.chestHumAt ?? 0)
+    )
+      return;
+    const nearby = this.chests.findIndex(
+      (c, i) =>
+        c.active &&
+        !c.openedAt &&
+        Math.hypot(
+          CHEST_SPOTS[i].x - this.position.x,
+          CHEST_SPOTS[i].z - this.position.z,
+        ) < 13,
+    );
+    if (nearby >= 0) {
+      this.chestHumAt = this.time + 2.5;
+      this.sound(520, 0.45, 0.012, 'sine');
+    }
   }
   buildCover() {
     // Short L-shaped sand walls break long sightlines, with two open exits.
@@ -907,7 +1009,7 @@ export class BattleGame {
       group.add(item);
     }
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.7, 0.92, 6),
+      new THREE.RingGeometry(0.6, 1.25, 12),
       new THREE.MeshBasicMaterial({
         color: color,
         transparent: true,
@@ -918,7 +1020,7 @@ export class BattleGame {
     ring.position.y = 0.07;
     group.add(ring);
     const beam = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.11, 0.5, 5, 4, 1, true),
+      new THREE.CylinderGeometry(0.2, 0.65, 4, 4, 1, true),
       new THREE.MeshBasicMaterial({
         color: color,
         transparent: true,
@@ -926,7 +1028,7 @@ export class BattleGame {
         depthWrite: false,
       }),
     );
-    beam.position.y = 2.5;
+    beam.position.y = 2;
     group.add(beam);
     group.position.copy(this.safePosition(drop.x, drop.z));
     group.visible = !drop.used;
@@ -1256,7 +1358,23 @@ export class BattleGame {
       this.network?.send({ type: 'revive', target: target.id });
       return;
     }
-    if (!this.isDowned()) this.pickup();
+    if (
+      this.isDowned() ||
+      this.state.phase !== 'playing' ||
+      this.state.dropping ||
+      this.mantle
+    )
+      return;
+    const chest = this.nearestChest();
+    if (chest >= 0) {
+      if (this.network) this.network.send({ type: 'chest', index: chest });
+      else {
+        this.openChest(chest);
+        this.notice('Treasure found. Press E to collect your loot.');
+      }
+      return;
+    }
+    this.pickup();
   }
   mark() {
     if (this.state.phase !== 'playing') return;
@@ -1568,6 +1686,7 @@ export class BattleGame {
       this.spawnLoot();
       this.noticeTimer = 5;
       this.zoneSeed = String(Math.random());
+      this.resetChests(this.zoneSeed);
       this.state.zone = zoneAt(0, this.zoneSeed);
     }
     if (
@@ -1707,6 +1826,11 @@ export class BattleGame {
     for (const loot of this.loot) {
       if (
         loot.used ||
+        !canReach(
+          this.position,
+          { x: loot.mesh.position.x, y: 0.85, z: loot.mesh.position.z },
+          this.physicsBounds(),
+        ) ||
         (loot.kind >= 3 &&
           this.state[loot.kind === 3 ? 'cells' : 'medkits'] >= SUPPLY_LIMIT)
       )
@@ -2181,7 +2305,7 @@ export class BattleGame {
     if (this.state.phase !== 'dying') return;
     this.state.phase = 'lost';
     this.spectatorId = this.killerId;
-    this.spectate(0);
+    if (this.networkRoom?.phase !== 'finished') this.spectate(0);
     this.emit();
   }
   finish(won: boolean) {
@@ -2224,6 +2348,8 @@ export class BattleGame {
   blocked(x: number, z: number) {
     return this.colliders.some(
       (b) =>
+        b.min.y < 1.8 &&
+        b.max.y > 0.08 &&
         x > b.min.x - 0.48 &&
         x < b.max.x + 0.48 &&
         z > b.min.z - 0.48 &&
@@ -2328,6 +2454,8 @@ export class BattleGame {
         radius: Math.max(0, zone.radius - 3),
       });
       if (!b.armed) {
+        const chest = this.nearestChest(new THREE.Vector3(p.x, 1.7, p.z));
+        if (chest >= 0) this.openChest(chest);
         const supply = this.loot
           .filter((l) => !l.used && l.kind < 3)
           .sort(
@@ -2734,13 +2862,16 @@ export class BattleGame {
       )
         this.finish(true);
       const near = this.state.dropping ? undefined : this.nearestLoot();
-      this.state.pickup = near
-        ? near.kind < 3
-          ? `${RARITIES[near.rarity].name} ${WEAPONS[near.kind].name}${!this.state.owned[near.kind] ? '' : near.rarity > (this.state.tiers?.[near.kind] ?? 0) ? ' · UPGRADE' : ' · AMMO'}`
-          : near.kind === 3
-            ? 'Shield cell · F to use'
-            : 'Medkit · Q to use'
-        : '';
+      this.state.pickup =
+        !this.state.dropping && this.nearestChest() >= 0
+          ? 'Open treasure chest'
+          : near
+            ? near.kind < 3
+              ? `${RARITIES[near.rarity].name} ${WEAPONS[near.kind].name}${!this.state.owned[near.kind] ? '' : near.rarity > (this.state.tiers?.[near.kind] ?? 0) ? ' · UPGRADE' : ' · AMMO'}`
+              : near.kind === 3
+                ? 'Shield cell · F to use'
+                : 'Medkit · Q to use'
+            : '';
       this.noticeTimer -= dt;
       if (this.noticeTimer <= 0) this.state.notice = '';
     }
@@ -2836,6 +2967,7 @@ export class BattleGame {
       }
     }
     this.updateMelee();
+    this.updateChests(dt);
     this.lootInstances?.update(this.time);
     this.tracers = this.tracers.filter((t) => {
       t.life -= dt;
@@ -3043,6 +3175,7 @@ export class BattleGame {
       this.cooldown = 0.3;
       this.resetBots(remotes.length);
       this.spawnLoot();
+      this.resetChests(`${room.code}:${room.round}`);
       this.showWeapon();
       this.storm.visible = true;
       this.camera.position.copy(this.position);
@@ -3192,6 +3325,7 @@ export class BattleGame {
     this.state.reloading = me.reloadUntil > room.now;
     this.reloadTimer = Math.max(0, (me.reloadUntil - room.now) / 1000);
     if (this.state.reloading && !wasReloading) this.reloadCue = 0;
+    if (room.chests) this.chests = room.chests.map((c) => ({ ...c }));
     room.loot.forEach((used, i) => {
       if (this.loot[i]) {
         this.loot[i].used = used;
@@ -3212,6 +3346,12 @@ export class BattleGame {
     for (const e of room.events) {
       if (this.networkEvents.has(e.id)) continue;
       this.networkEvents.add(e.id);
+      if (
+        e.type === 'chest' &&
+        e.end &&
+        this.position.distanceTo(new THREE.Vector3(...e.end)) < 22
+      )
+        this.sound(740, 0.24, 0.045, 'triangle');
       if (e.type === 'shot' && e.player !== me.id && e.end) {
         const p = room.players.find((p) => p.id === e.player);
         if (p) {
@@ -3336,6 +3476,16 @@ export class BattleGame {
       this.state.phase !== 'won'
     )
       this.finish(true);
+    if (
+      room.phase === 'finished' &&
+      this.state.phase !== 'won' &&
+      this.state.phase !== 'dying'
+    ) {
+      this.state.phase = 'lost';
+      this.shooting = false;
+      this.keys.clear();
+      if (document.pointerLockElement) document.exitPointerLock();
+    }
     if (me.spectator && this.state.phase === 'paused') {
       if (room.phase === 'countdown') this.state.phase = 'spectating';
       this.spectate(0);

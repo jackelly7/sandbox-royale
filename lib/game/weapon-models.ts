@@ -11,7 +11,7 @@ function buildWeaponModel(
 ) {
   const k = modelKit(WEAPONS[index].short),
     { box, tube } = k;
-  const dark = '#263239',
+  const dark = detail === 'world' ? RARITIES[rarity].color : '#263239',
     edge = '#50636b',
     black = '#142026',
     pale = '#e6e1cb';
@@ -45,7 +45,16 @@ function buildWeaponModel(
     tube(0.039, 0.012, black, 0, 0.05, -0.817);
     if (detail === 'world')
       box(0.215, 0.13, 0.23, accent, 0, -0.04, -0.28, 0.025);
-    box(0.16, 0.21, 0.39, '#b97745', 0, -0.055, 0.41, 0.035);
+    box(
+      0.16,
+      0.21,
+      0.39,
+      detail === 'world' ? accent : '#b97745',
+      0,
+      -0.055,
+      0.41,
+      0.035,
+    );
     box(0.18, 0.23, 0.045, black, 0, -0.055, 0.61);
     box(0.014, 0.09, 0.14, black, 0.112, 0.02, 0.06);
     box(0.035, 0.045, 0.035, '#fc8461', 0, 0.115, -0.755);

@@ -162,7 +162,7 @@ void test('server does not allow bullets through island buildings', () => {
   const room = started(),
     [p, target] = room.players;
   Object.assign(p, {
-    x: 18 * ARENA_SCALE,
+    x: 21 * ARENA_SCALE,
     y: 1.7,
     z: 0,
     yaw: 0,
@@ -171,7 +171,7 @@ void test('server does not allow bullets through island buildings', () => {
     owned: [false, false, true],
     ammo: [0, 0, 5],
   });
-  Object.assign(target, { x: 18 * ARENA_SCALE, y: 1.7, z: -40 * ARENA_SCALE });
+  Object.assign(target, { x: 21 * ARENA_SCALE, y: 1.7, z: -40 * ARENA_SCALE });
   applyCommand(room, p.id, { type: 'shoot', pose: p, aiming: true }, at + 5100);
   assert.equal(target.health, 100);
   assert.equal(target.shield, 50);

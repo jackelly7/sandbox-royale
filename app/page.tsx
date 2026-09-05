@@ -1064,7 +1064,13 @@ export default function Home() {
                 className="pickup-prompt"
                 onClick={() => game.current?.interact()}
               >
-                <kbd>E</kbd> COLLECT <b>{state.pickup}</b>
+                <kbd>E</kbd>{' '}
+                {state.pickup === 'Open treasure chest' ? 'OPEN' : 'COLLECT'}{' '}
+                <b>
+                  {state.pickup === 'Open treasure chest'
+                    ? 'Treasure chest'
+                    : state.pickup}
+                </b>
               </button>
             )}
           {!spectating && (
@@ -1349,8 +1355,11 @@ export default function Home() {
         </section>
       )}
       {ended && (
-        <section className="pause-overlay result-overlay">
-          <div className="result-panel">
+        <section
+          className="pause-overlay result-overlay"
+          aria-label="Match results"
+        >
+          <div className="result-panel" key={room?.round ?? state.survived}>
             <div className="result-icon">
               {state.phase === 'won' ? (
                 <Trophy size={38} />
@@ -1370,6 +1379,13 @@ export default function Home() {
                   : 'LAST ONE IN\nTHE SANDBOX.'
                 : 'BACK TO THE\nSANDBOX?'}
             </h2>
+            <p className="result-context">
+              {session
+                ? room?.phase === 'finished'
+                  ? `Round ${room.round} complete · Your room stays together`
+                  : 'Your friends are still in the sandbox'
+                : 'A fresh sandbox is one drop away'}
+            </p>
             <div className="result-stats">
               <div>
                 <b>
@@ -1394,16 +1410,14 @@ export default function Home() {
                 <span>SURVIVED</span>
               </div>
             </div>
-            {session &&
-              (room?.phase === 'playing' || room?.phase === 'finished') &&
-              state.phase === 'lost' && (
-                <button
-                  className="deploy-button"
-                  onClick={() => game.current?.spectate()}
-                >
-                  <Eye size={22} /> WATCH REMAINING PLAYERS
-                </button>
-              )}
+            {session && room?.phase === 'playing' && state.phase === 'lost' && (
+              <button
+                className="deploy-button"
+                onClick={() => game.current?.spectate()}
+              >
+                <Eye size={22} /> WATCH REMAINING PLAYERS
+              </button>
+            )}
             {session && room?.phase === 'finished' && (
               <div className="scoreboard" aria-label="Match results">
                 <div className="scoreboard-heading">
@@ -1430,24 +1444,45 @@ export default function Home() {
                   ))}
               </div>
             )}
-            {session &&
-              room?.phase === 'finished' &&
-              room.host === session.playerId && (
+            {session && room?.phase === 'finished' && (
+              <div className="rematch-ready">
+                <div
+                  className="ready-players"
+                  aria-label="Players ready for next round"
+                >
+                  {room.players
+                    .filter((p) => p.connected)
+                    .map((p) => (
+                      <span key={p.id} className={p.ready ? 'is-ready' : ''}>
+                        {p.ready ? '✓' : '○'} {p.name}
+                      </span>
+                    ))}
+                </div>
                 <button
                   className="deploy-button"
-                  onClick={() => {
-                    client.current?.send({ type: 'rematch' });
-                    setPanel('friends');
-                  }}
+                  disabled={connection !== 'connected'}
+                  onClick={() => client.current?.send({ type: 'ready' })}
                 >
-                  PLAY AGAIN <RotateCcw size={22} />
+                  {ownPlayer?.ready
+                    ? 'READY · CLICK TO CANCEL'
+                    : 'READY FOR ANOTHER DROP'}{' '}
+                  <RotateCcw size={22} />
                 </button>
-              )}
+                <output className="ready-status">
+                  {room.players.filter((p) => p.connected && p.ready).length}/
+                  {room.players.filter((p) => p.connected).length} ready.{' '}
+                  {room.players.filter((p) => p.connected).length < 2
+                    ? 'Invite a friend to play again.'
+                    : 'The next drop starts when everyone is ready.'}
+                </output>
+              </div>
+            )}
             <button
               className="secondary-button"
               onClick={() => (session ? setPanel('friends') : start())}
             >
-              {session ? 'BACK TO ROOM' : 'DROP AGAIN'} <RotateCcw size={24} />
+              {session ? 'ROOM & INVITES' : 'DROP AGAIN'}{' '}
+              <RotateCcw size={24} />
             </button>
             <button className="text-button" onClick={backToLobby}>
               <ArrowLeft size={16} />
@@ -1519,7 +1554,7 @@ export default function Home() {
               <div className="help-note">
                 <Shield size={21} />
                 <p>
-                  Steer your parachute toward the glowing loot using WASD. You
+                  Steer toward glowing loot or treasure chests using WASD. You
                   land unarmed. Find an AR, shotgun, or sniper at a glowing drop
                   and press E to collect it. Use 1–3 or the scroll wheel to
                   switch between weapons you have collected. Common weapons are

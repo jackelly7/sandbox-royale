@@ -112,7 +112,7 @@ try {
   assert.ok(
     friend.room.players.find((p) => p.id === host.session.playerId).z > 110,
   );
-  assert.equal(host.room.loot.filter((used) => !used).length, 46);
+  assert.equal(host.room.loot.filter((used) => !used).length, 30);
   console.log(
     'PASS expanded movement, outer-map loot, and 55-second opening circle across two live sockets',
   );

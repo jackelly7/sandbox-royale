@@ -7,8 +7,8 @@ A browser-based first-person battle royale built with Three.js, React, and Vinex
 1. Select **Play with friends**, enter a callsign, and create a room.
 2. Use **Copy invite link**, or send your friends the six-character room code.
 3. Each friend opens the game, enters a callsign, and joins the room.
-4. The host selects **Start match**. Everyone selects **Enter match** to capture their mouse. After a five-second countdown, everyone descends under a steerable parachute. Use WASD or the touch stick to choose a landing spot; labeled loot is visible below.
-5. Eliminated players see a short death sequence, then automatically spectate their killer. Use [ / ] or Previous / Next to follow another survivor. Open Results to see the scoreboard. The last surviving player wins. The host can prepare a rematch in the same room.
+4. The host selects **Start match**. Everyone selects **Enter match** to capture their mouse. After a five-second countdown, everyone descends under a steerable parachute. Use WASD or the touch stick to choose a landing spot; glowing loot is visible below.
+5. Eliminated players see a short death sequence, then automatically spectate their killer. Use [ / ] or Previous / Next to follow another survivor. Open Results to see the scoreboard. The last surviving player wins. Everyone can ready up from Results; when all connected players are ready, the next countdown begins in the same room.
 
 The game website must be shared with friends before they can open it. Room codes control which match they join. Opening the in-game menu does not pause an online match. A dropped connection automatically retries; players have 20 seconds to reconnect before elimination. Rooms expire after two hours. Refreshing the page leaves the current session; reconnect is intended for interruptions within the open page.
 
@@ -31,7 +31,7 @@ The server validates inventory ownership, movement, cover, weapon cooldowns, amm
 
 Medkits and shield cells are stored separately, with a maximum of three each. A medkit restores up to 75 health over four seconds; a shield cell restores up to 50 shields over 2.5 seconds. Walking is allowed at half speed while healing. Incoming damage, firing, reloading, weapon switching, or canceling interrupts use without spending the item. Health and shields cap at 100. All recovery timers, pickups and inventory changes are resolved by the server.
 
-The HUD includes damage totals, headshot and shield-break feedback, a directional warning for hits and nearby gunfire, a kill feed, and safe-zone distance and direction. Deaths trigger a falling avatar animation and killer identification. Killer identity persists in room snapshots so spectating still works after a delayed update. The match results list everyone's placement and eliminations, with a host rematch button.
+The HUD includes damage totals, headshot and shield-break feedback, a directional warning for hits and nearby gunfire, a kill feed, and safe-zone distance and direction. Deaths trigger a falling avatar animation and killer identification. Killer identity persists in room snapshots so spectating still works after a delayed update. The match results list everyone's placement and eliminations, with per-player ready indicators and a shared ready-up button.
 
 Parachutes start 42 meters above the ground and descend at six meters per second after the countdown. Players can steer, but cannot heal, fire, or claim ground loot until landing. The server controls altitude and resolves landings over buildings to nearby clear ground.
 
@@ -82,3 +82,9 @@ G or middle-click marks an enemy, loot, or location for eight seconds. The touch
 The arena uses sandy ground, wooden sandbox edges, sandcastle cover, and oversized toy buckets. Static geometry still batches down to roughly 60 draw submissions.
 
 The sandbox is 363 meters across its playable circle, with horizontal terrain scale 1.65. Player size, cover heights, weapon ranges, and movement speeds stay unchanged. Every room uses the full opening circle: 55 seconds to explore before the first closure, followed by off-center phases reaching the final circle after 335 seconds. Eliminations can end a round earlier. `node scripts/test-large-map.mjs` checks expanded movement, outer loot, and opening timings over real sockets.
+
+Treasure chests replace sixteen loose floor pickups: each round has 31 floor items and eight active chests chosen from twelve locations. Both central castle halls always contain a chest. Press E nearby to open it; a Rare, Epic, or Legendary gun with ammo and one healing item appear as shared, individually claimable loot. Opening is atomic on the server and cannot happen through walls, from the roof, or during the parachute drop. Chests use three instanced drawing batches, animated lids, and quiet proximity chimes. Weapon bodies, saturated beacons, and wide colored ground rings make rarity visible without overhead item labels.
+
+Sandcastle Square and Bucket Town now have four doorways, separate roof collision, interior partitions, and exterior mantle ledges leading to the roof. Results fade in after the death sequence or final elimination. Connected players can ready up or cancel without leaving the scoreboard; late arrivals can join that next drop too. The existing host room reset command remains available for older clients.
+
+`node scripts/test-chests.mjs` checks entering a castle, shared chest opening and pickup, a late join, and ready-up into a fresh round using real WebSockets. Headless geometry checks cover the open halls, wall/roof blocking, mantle ledges, shared loot ownership, and the render budget with every chest opened.
