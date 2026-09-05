@@ -1,3 +1,10 @@
+import { MELEE, meleeTarget, meleeBody } from './melee.ts';
+import {
+  bulletTrail,
+  fadeTrail,
+  disposeTrail,
+  stormWall,
+} from './combat-effects.ts';
 import { shoulderCamera, convergedAim } from './camera-rig.ts';
 import { FEEL, reloadMotion, animateWeapon } from './weapon-feel.ts';
 import { WeaponAudio } from './weapon-audio.ts';
@@ -32,7 +39,7 @@ import {
 } from './character-models.ts';
 import { supplyModel } from './supply-models.ts';
 import { LootInstances } from './loot-instances.ts';
-import { chamferBox } from './model-kit.ts';
+import { chamferBox, modelKit } from './model-kit.ts';
 import { batchIsland } from './render-world.ts';
 import type { Command, RoomSnapshot, PlayerPose } from './multiplayer.ts';
 import {
@@ -239,6 +246,9 @@ export class BattleGame {
   renderer: THREE.WebGLRenderer;
   world = new THREE.Group();
   gun = new THREE.Group();
+  fists?: THREE.Group;
+  meleeAt = -100;
+  zoneCue = '';
   bots: Bot[] = [];
   loot: Loot[] = [];
   colliders: THREE.Box3[] = [];
@@ -350,6 +360,7 @@ export class BattleGame {
     this.scene.add(this.parachute);
     this.parachute.visible = false;
     this.buildGun();
+    this.buildFists();
     try {
       if (localStorage.getItem('sandbox-perspective') === 'third')
         this.perspective = 'third';
@@ -687,16 +698,7 @@ export class BattleGame {
       );
       this.world.add(g);
     }
-    this.storm = new THREE.Mesh(
-      new THREE.CylinderGeometry(1, 1, 65, 96, 1, true),
-      new THREE.MeshBasicMaterial({
-        color: '#b291f4',
-        transparent: true,
-        opacity: 0.18,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-      }),
-    );
+    this.storm = stormWall();
     this.storm.position.y = 24;
     this.storm.scale.set(107, 1, 107);
     this.storm.visible = false;
@@ -935,6 +937,7 @@ export class BattleGame {
       index >= 0 &&
       this.state.owned[index] &&
       !this.thirdPerson() &&
+      !this.isPunching() &&
       !(this.aiming && index === 2) &&
       !this.isDowned();
     this.gunModels?.forEach((model, i) => {
@@ -1083,6 +1086,7 @@ export class BattleGame {
       if (e.code === 'KeyR') this.reload();
       if (!e.repeat && e.code === 'KeyV')
         this.setPerspective(this.perspective === 'third' ? 'first' : 'third');
+      if (!e.repeat && e.code === 'KeyB') this.melee();
       if (!e.repeat && e.code === 'KeyE') this.interact();
       if (!e.repeat && e.code === 'KeyG') this.mark();
       if (!e.repeat && e.code === 'KeyQ') this.heal('medkit');
@@ -1425,6 +1429,7 @@ export class BattleGame {
       this.state.weapon >= 0 &&
       !this.state.healing &&
       !this.state.reloading &&
+      !this.isPunching() &&
       !this.state.dropping &&
       !this.isDowned();
     this.showWeapon();
@@ -1515,6 +1520,8 @@ export class BattleGame {
       this.weaponAmmo = [0, 0, 0];
       this.reserveAmmo = [0, 0, 0];
       this.reloadTimer = 0;
+      this.meleeAt = -100;
+      this.zoneCue = '';
       this.cooldown = 0.3;
       this.resetBots();
       for (const b of this.bots) {
@@ -1806,7 +1813,11 @@ export class BattleGame {
       this.isDowned()
     )
       return;
-    if (this.state.weapon < 0 || !this.state.owned[this.state.weapon]) return;
+    if (this.state.weapon < 0) {
+      this.melee();
+      return;
+    }
+    if (!this.state.owned[this.state.weapon]) return;
     this.cancelHeal(false);
     const i = this.state.weapon,
       w = WEAPONS[i];
@@ -1897,14 +1908,14 @@ export class BattleGame {
       const end = first
         ? first.point
         : this.ray.ray.at(w.range, new THREE.Vector3());
-      if (p === 0)
-        this.tracer(
-          this.thirdPerson()
-            ? origin
-            : this.camera.localToWorld(new THREE.Vector3(0.2, -0.17, -0.7)),
-          end,
-          '#ffe9a8',
-        );
+      this.tracer(
+        this.thirdPerson()
+          ? origin
+          : this.camera.localToWorld(new THREE.Vector3(0.2, -0.17, -0.7)),
+        end,
+        '#fff0a3',
+        Boolean(first),
+      );
     }
     if (hit) {
       this.state.hit = 0.18;
@@ -1912,13 +1923,161 @@ export class BattleGame {
     }
     this.emit();
   }
-  tracer(from: THREE.Vector3, to: THREE.Vector3, color: string) {
-    const line = new THREE.Line(
-      new THREE.BufferGeometry().setFromPoints([from, to]),
-      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.7 }),
-    );
+  tracer(
+    from: THREE.Vector3,
+    to: THREE.Vector3,
+    color: string,
+    impact = false,
+  ) {
+    // Bound bursts even when several shotguns fire together.
+    if (this.tracers.length >= 96) disposeTrail(this.tracers.shift()!.mesh);
+    const line = bulletTrail(from, to, color, impact);
     this.scene.add(line);
-    this.tracers.push({ mesh: line, life: 0.08 });
+    this.tracers.push({ mesh: line, life: 0.18 });
+  }
+  isPunching() {
+    return this.time - (this.meleeAt ?? -100) < MELEE.animation;
+  }
+  buildFists() {
+    this.fists = new THREE.Group();
+    for (const side of [-1, 1]) {
+      const kit = modelKit('Glove');
+      kit.box(0.16, 0.17, 0.23, '#283c46', 0, 0, 0, 0.035);
+      kit.box(0.17, 0.07, 0.12, '#8de0cf', 0, -0.02, 0.15, 0.025);
+      const hand = kit.finish();
+      hand.userData.side = side;
+      this.fists.add(hand);
+    }
+    this.fists.visible = false;
+    this.camera.add(this.fists);
+  }
+  animatePunch(root: THREE.Group, at: number) {
+    const age = this.time - at;
+    if (age < 0 || age >= MELEE.animation) return false;
+    const reach = Math.sin((Math.PI * age) / MELEE.animation);
+    const arm = root.getObjectByName('Right arm');
+    if (arm) {
+      arm.rotation.x = -1.0 - reach * 1.55;
+      arm.rotation.z = -reach * 0.12;
+    }
+    const held =
+      root.getObjectByName('Player weapon') ??
+      root.getObjectByName('Bot weapon');
+    if (held) held.visible = false;
+    return true;
+  }
+  updateMelee() {
+    if (this.fists) {
+      this.fists.visible =
+        this.state.phase === 'playing' &&
+        !this.thirdPerson() &&
+        !this.isDowned() &&
+        !this.state.dropping &&
+        (this.state.weapon < 0 || this.isPunching());
+      const age = this.time - (this.meleeAt ?? -100),
+        reach = this.isPunching()
+          ? Math.sin((Math.PI * age) / MELEE.animation)
+          : 0;
+      for (const hand of this.fists.children) {
+        const side = hand.userData.side;
+        hand.position.set(
+          side * (0.3 - (side > 0 ? reach * 0.19 : 0)),
+          -0.3 + (side > 0 ? reach * 0.13 : 0),
+          -0.48 - (side > 0 ? reach * 0.42 : 0),
+        );
+        hand.rotation.set(side > 0 ? -reach * 0.35 : 0, -side * 0.15, 0);
+      }
+    }
+    if (this.avatar?.visible) {
+      const arm = this.avatar.getObjectByName('Right arm');
+      if (arm) arm.rotation.z = 0;
+      this.animatePunch(this.avatar, this.meleeAt ?? -100);
+    }
+    if (this.state.phase === 'playing') this.showWeapon();
+  }
+  melee() {
+    if (
+      this.state.phase !== 'playing' ||
+      this.state.dropping ||
+      this.isDowned() ||
+      this.mantle ||
+      this.cooldown > 0 ||
+      (this.network && this.networkRoom?.phase !== 'playing')
+    )
+      return;
+    this.cancelHeal(false);
+    this.reloadTimer = 0;
+    this.state.reloading = false;
+    this.aiming = false;
+    this.meleeAt = this.time;
+    this.cooldown = MELEE.interval;
+    this.actionPlayed = true;
+    this.showWeapon();
+    this.sound(210, 0.12, 0.025, 'triangle');
+    if (this.network) {
+      this.network.send({ type: 'melee', pose: this.pose() });
+      this.emit();
+      return;
+    }
+    const origin = {
+      x: this.position.x,
+      y: this.position.y - (this.state.crouching ? 0.65 : 0),
+      z: this.position.z,
+    };
+    const contact = meleeTarget(
+      origin,
+      this.yaw,
+      this.pitch,
+      this.bots.flatMap((b, i) =>
+        b.hp > 0
+          ? [
+              meleeBody(
+                String(i),
+                b.mesh.position.x,
+                b.mesh.position.y + 1.7,
+                b.mesh.position.z,
+              ),
+            ]
+          : [],
+      ),
+      this.colliders.map((b) => ({
+        min: b.min.toArray(),
+        max: b.max.toArray(),
+      })),
+    );
+    if (contact) {
+      const b = this.bots[Number(contact.id)],
+        oldShield = b.shield;
+      const amount = Math.min(MELEE.damage, b.hp + b.shield),
+        result = takeDamage(b.hp, b.shield, amount);
+      b.hp = result.health;
+      b.shield = result.shield;
+      this.hitFeedback(
+        amount,
+        Math.min(oldShield, amount),
+        false,
+        oldShield > 0 && b.shield === 0,
+      );
+      this.sound(90, 0.12, 0.05, 'triangle');
+      if (b.hp <= 0) this.killBot(b, true);
+    }
+    this.emit();
+  }
+  updateZoneCue() {
+    const zone = this.state.zone;
+    const material = this.storm.material;
+    if (material instanceof THREE.ShaderMaterial) {
+      material.uniforms.time.value = this.time;
+      material.uniforms.closing.value = zone?.stage === 'closing' ? 1 : 0;
+    }
+    if (!zone || this.state.dropping) return;
+    const cue = `${zone.phase}:${zone.stage}:${zone.stage === 'waiting' && zone.remaining <= 5 ? 'soon' : ''}`;
+    if (cue !== this.zoneCue) {
+      this.zoneCue = cue;
+      if (zone.stage === 'closing') this.sound(420, 0.65, 0.045, 'sine');
+      else if (zone.stage === 'waiting' && zone.remaining <= 5)
+        this.sound(620, 0.3, 0.035, 'sine');
+    }
   }
   beginBotDeath(b: Bot) {
     b.dying = 0.9;
@@ -2358,6 +2517,7 @@ export class BattleGame {
         this.state.zone?.z ?? 0,
       );
       this.storm.scale.set(this.state.storm, 1, this.state.storm);
+      this.updateZoneCue();
       this.cooldown = Math.max(0, this.cooldown - dt);
       this.recoil *= Math.exp(-dt * 18);
       this.viewKick *= Math.exp(-dt * 12);
@@ -2579,6 +2739,12 @@ export class BattleGame {
           }
         }
       });
+      for (const b of this.bots) {
+        const arm = b.mesh.getObjectByName('Right arm');
+        if (arm) arm.rotation.z = 0;
+        if (b.hp > 0)
+          this.animatePunch(b.mesh, b.mesh.userData.meleeAt ?? -100);
+      }
       this.networkTime += dt;
       if (this.networkTime > 0.05) {
         this.networkTime = 0;
@@ -2628,13 +2794,13 @@ export class BattleGame {
         };
       }
     }
+    this.updateMelee();
     this.lootInstances?.update(this.time);
     this.tracers = this.tracers.filter((t) => {
       t.life -= dt;
+      fadeTrail(t.mesh, t.life);
       if (t.life <= 0) {
-        this.scene.remove(t.mesh);
-        t.mesh.geometry.dispose();
-        (t.mesh.material as THREE.Material).dispose();
+        disposeTrail(t.mesh);
         return false;
       }
       return true;
@@ -2831,6 +2997,8 @@ export class BattleGame {
       this.pitch = -0.6;
       this.velocityY = 0;
       this.reloadTimer = 0;
+      this.meleeAt = -100;
+      this.zoneCue = '';
       this.cooldown = 0.3;
       this.resetBots(remotes.length);
       this.spawnLoot();
@@ -2870,6 +3038,8 @@ export class BattleGame {
         b.name = label;
         if (b.tag) b.tag.material.color.set(teammate ? '#7effd1' : '#ffffff');
       }
+      b.mesh.userData.meleeAt =
+        this.time - (room.now - (p.meleeAt ?? -100000)) / 1000;
       b.mesh.userData.reloadEnd =
         this.time + Math.max(0, (p.reloadUntil - room.now) / 1000);
       b.mesh.userData.pitch = p.pitch;
@@ -3020,6 +3190,17 @@ export class BattleGame {
             '#ffce8f',
           );
         }
+      }
+      if (e.type === 'melee' && e.player !== me.id) {
+        const attacker = room.players.find((p) => p.id === e.player);
+        if (
+          attacker &&
+          Math.hypot(
+            attacker.x - this.position.x,
+            attacker.z - this.position.z,
+          ) < 10
+        )
+          this.sound(e.end ? 90 : 210, 0.12, e.end ? 0.035 : 0.015, 'triangle');
       }
       if (e.type === 'hit' && e.player === me.id) {
         this.hitFeedback(

@@ -3379,3 +3379,96 @@ kbd {
 .weapon-slot small {
   color: var(--weapon-color);
 }
+
+.zone-banner {
+  position: absolute;
+  top: 108px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: min(440px, calc(100% - 32px));
+  padding: 10px 16px;
+  border: 1px solid #d2a6ff;
+  border-left: 4px solid #d2a6ff;
+  background: #241535ed;
+  color: #fff;
+  pointer-events: none;
+  z-index: 5;
+  text-align: center;
+}
+.zone-banner strong {
+  display: block;
+  font-size: 16px;
+  letter-spacing: 0.08em;
+}
+.zone-banner strong span {
+  margin-left: 10px;
+  color: #e2b9ff;
+  font-variant-numeric: tabular-nums;
+}
+.zone-banner > span {
+  display: block;
+  margin-top: 4px;
+  font-size: 13px;
+  color: #e9ddf5;
+}
+.circle-closing .current-circle {
+  animation: closing-ring 1.8s ease-in-out infinite;
+}
+@keyframes closing-ring {
+  50% {
+    stroke: #ba74ff;
+    stroke-width: 4;
+  }
+}
+.touch-melee {
+  position: absolute;
+  right: 175px;
+  bottom: 135px;
+  width: 52px;
+  height: 44px;
+  border: 1px solid #fff8;
+  border-radius: 12px;
+  background: #222d;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: auto;
+  touch-action: none;
+}
+@media (max-width: 700px) {
+  .zone-banner {
+    top: 145px;
+    max-width: 260px;
+    padding: 7px 10px;
+  }
+  .zone-banner strong {
+    font-size: 14px;
+  }
+  .zone-banner > span {
+    font-size: 12px;
+  }
+  .touch-melee {
+    right: 155px;
+    bottom: 145px;
+  }
+}
+@media (max-height: 610px) {
+  .zone-banner {
+    top: 68px;
+    padding: 6px 10px;
+    max-width: 330px;
+  }
+  .zone-banner > span {
+    display: none;
+  }
+  .touch-melee {
+    right: 175px;
+    bottom: 105px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .circle-closing .current-circle {
+    animation: none;
+  }
+}

@@ -96,7 +96,8 @@ const initial: GameState = {
 const controls = [
   ['W A S D', 'Move'],
   ['MOUSE', 'Look around'],
-  ['LEFT CLICK', 'Fire'],
+  ['LEFT CLICK', 'Fire / punch when unarmed'],
+  ['B', 'Melee attack'],
   ['RIGHT CLICK', 'Aim down sights'],
   ['SHIFT', 'Sprint'],
   ['C / CTRL', 'Toggle crouch / hold crouch'],
@@ -121,7 +122,7 @@ function IslandMap({
 }) {
   return (
     <svg
-      className={large ? 'island-map large' : 'island-map'}
+      className={`${large ? 'island-map large' : 'island-map'} ${state.zone?.stage === 'closing' ? 'circle-closing' : ''}`}
       viewBox="-120 -120 240 240"
       aria-label="Sandbox map with your position and the safe zone"
     >
@@ -216,13 +217,20 @@ function IslandMap({
       />
       {state.phase !== 'lobby' && (
         <>
+          <path
+            d={`M-120 -120h240v240h-240Z M${(state.zone?.x ?? 0) - state.storm} ${state.zone?.z ?? 0} a${state.storm} ${state.storm} 0 1 0 ${state.storm * 2} 0 a${state.storm} ${state.storm} 0 1 0 ${-state.storm * 2} 0Z`}
+            fill="#6225b7"
+            fillOpacity="0.42"
+            fillRule="evenodd"
+          />
           <circle
+            className="current-circle"
             cx={state.zone?.x ?? 0}
             cy={state.zone?.z ?? 0}
             r={state.storm}
             fill="none"
-            stroke="#e7ccff"
-            strokeWidth="2"
+            stroke="#f0d9ff"
+            strokeWidth="3.2"
           />
           {state.zone && state.zone.stage !== 'final' && (
             <circle
@@ -231,8 +239,8 @@ function IslandMap({
               r={state.zone.next.radius}
               fill="none"
               stroke="#ffffff"
-              strokeWidth="1.5"
-              strokeDasharray="4 3"
+              strokeWidth="2"
+              strokeDasharray="5 3"
               aria-label="Next safe circle"
             />
           )}
@@ -685,6 +693,27 @@ export default function Home() {
               <b>{zone.stage === 'final' ? '' : clock}</b>
             </div>
           </div>
+          {playing &&
+            !state.dropping &&
+            (zone.stage === 'closing' ||
+              (zone.stage === 'waiting' && zone.remaining <= 5)) && (
+              <div
+                className={`zone-banner ${zone.stage === 'closing' ? 'closing' : ''}`}
+              >
+                <strong>
+                  {zone.stage === 'closing'
+                    ? 'CIRCLE CLOSING'
+                    : 'CIRCLE CLOSES SOON'}{' '}
+                  <span>{clock}</span>
+                </strong>
+                <span>
+                  {Math.hypot(state.x - zone.next.x, state.z - zone.next.z) <=
+                  zone.next.radius
+                    ? 'You’re inside the next safe circle'
+                    : `${Math.ceil(Math.hypot(state.x - zone.next.x, state.z - zone.next.z) - zone.next.radius)}m to the next safe circle · Follow the white ring`}
+                </span>
+              </div>
+            )}
           {playing && (
             <div
               className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : state.weapon === 2 ? 'sniper-hip' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
@@ -1107,7 +1136,7 @@ export default function Home() {
                     ? 'RELOADING'
                     : state.weapon >= 0
                       ? `${RARITIES[state.tiers?.[state.weapon] ?? 0].name} · ${WEAPONS[state.weapon].short}`
-                      : 'UNARMED'}
+                      : 'FISTS'}
                 </span>
                 <div>
                   <b>
@@ -1119,10 +1148,14 @@ export default function Home() {
                 </div>
                 <small>
                   {state.weapon < 0 ? (
-                    'FIND A WEAPON DROP'
+                    touch ? (
+                      'TAP FIRE TO PUNCH · FIND A GUN'
+                    ) : (
+                      'LEFT CLICK TO PUNCH · FIND A GUN'
+                    )
                   ) : (
                     <>
-                      <kbd>R</kbd> RELOAD · 1–3 / WHEEL
+                      <kbd>R</kbd> RELOAD · <kbd>B</kbd> MELEE · 1–3 / WHEEL
                     </>
                   )}
                 </small>
@@ -1185,7 +1218,7 @@ export default function Home() {
               </div>
               <button
                 className="touch-fire"
-                aria-label="Fire weapon"
+                aria-label={state.weapon < 0 ? 'Punch' : 'Fire weapon'}
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
                   if (game.current) {
@@ -1201,6 +1234,16 @@ export default function Home() {
                 }}
               >
                 <Crosshair size={32} />
+              </button>
+              <button
+                className="touch-melee"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  game.current?.melee();
+                }}
+                aria-label="Melee punch"
+              >
+                PUNCH
               </button>
               <button
                 className="touch-ping"
@@ -1456,8 +1499,8 @@ export default function Home() {
                   to mantle onto it. Red medkits and blue shield cells go into
                   your inventory. Press Q to heal or F to restore shields. Carry
                   up to three of each. Healing continues when you take damage.
-                  Firing, switching weapons, or reloading cancels healing
-                  without using the item.
+                  Firing, melee attacks, switching weapons, or reloading cancels
+                  healing without using the item.
                 </p>
               </div>
               <p className="touch-help">

@@ -10,8 +10,15 @@ export type WorldDrop = {
 };
 export function floorAvailable(index: number) {
   if (index < 19 || index >= 59) return true;
-  if (index < 43) return (index - 19) % 3 === Math.floor((index - 19) / 3) % 3;
-  return (index - 43) % 2 === Math.floor((index - 43) / 2) % 2;
+  if (index < 43) {
+    const sector = Math.floor((index - 19) / 3),
+      slot = (index - 19) % 3;
+    return (
+      slot === sector % 3 || (sector % 2 === 0 && slot === (sector + 1) % 3)
+    );
+  }
+  const sector = Math.floor((index - 43) / 2);
+  return sector % 2 === 0 || (index - 43) % 2 === sector % 2;
 }
 export function floorRarity(index: number) {
   if (index === 12) return 3;

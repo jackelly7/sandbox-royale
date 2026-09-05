@@ -41,6 +41,7 @@ export type Player = PlayerPose &
     reserve: number[];
     reloadUntil: number;
     shotAt: number;
+    meleeAt?: number;
   };
 export type RoomSnapshot = {
   code: string;
@@ -63,6 +64,7 @@ export type GameEvent = {
   id: string;
   type:
     | 'shot'
+    | 'melee'
     | 'hit'
     | 'elimination'
     | 'pickup'
@@ -85,6 +87,7 @@ export type Command =
   | { type: 'pose'; pose: PlayerPose }
   | { type: 'shoot'; pose: PlayerPose; aiming: boolean }
   | { type: 'mantle'; pose: PlayerPose }
+  | { type: 'melee'; pose: PlayerPose }
   | { type: 'reload' }
   | { type: 'heal'; item: SupplyKind }
   | { type: 'cancelHeal' }

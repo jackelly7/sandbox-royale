@@ -581,3 +581,51 @@ void test('multiplayer shoulder shots send physical player coordinates and conve
     'Server aim starts at crouched eye and intersects the target',
   );
 });
+
+void test('unarmed primary fire punches without granting a gun, and finishes with the normal death animation', () => {
+  const game = arena();
+  game.resetBots();
+  game.state.weapon = -1;
+  game.state.owned = [false, false, false];
+  game.position.set(0, 1.7, 40);
+  game.bots.forEach((b, i) => {
+    if (i) {
+      b.hp = 0;
+      b.mesh.visible = false;
+    }
+  });
+  const target = game.bots[0];
+  target.mesh.position.set(0, 0, 38);
+  target.shield = 0;
+  target.hp = 25;
+  game.shoot();
+  assert.equal(target.hp, 0);
+  assert.ok(target.dying > 0);
+  assert.equal(game.state.kills, 1);
+  assert.equal(game.state.weapon, -1);
+  assert.deepEqual(game.state.owned, [false, false, false]);
+  assert.equal(game.isPunching(), true);
+  assert.equal(game.gun.visible, false);
+  game.time = 1;
+  assert.equal(game.isPunching(), false);
+});
+void test('bullet effects mark actual endpoints, show every shotgun pellet, and cap bursts', () => {
+  const game = arena();
+  game.state.weapon = 1;
+  game.shoot();
+  assert.equal(game.tracers.length, 7);
+  for (const trail of game.tracers) {
+    assert.equal(trail.mesh.children.length, 1);
+    assert.equal(trail.life, 0.18);
+    assert.ok(trail.mesh.children[0] instanceof THREE.Mesh);
+  }
+  for (let i = 0; i < 200; i++)
+    game.tracer(
+      new THREE.Vector3(),
+      new THREE.Vector3(0, 0, -10),
+      '#fff',
+      true,
+    );
+  assert.equal(game.tracers.length, 96);
+  assert.equal(game.tracers[0].mesh.children.length, 2);
+});

@@ -1,3 +1,4 @@
+import { MELEE, meleeTarget, meleeBody } from '../lib/game/melee.ts';
 import {
   floorAvailable,
   floorRarity,
@@ -147,6 +148,7 @@ export function createMember(
     reserve: [0, 0, 0],
     reloadUntil: 0,
     shotAt: 0,
+    meleeAt: -1000,
     lastSeen: now,
     moveAt: now,
     credit: 1,
@@ -519,6 +521,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
   const w = WEAPONS[p.weapon];
   if (
     p.reloadUntil ||
+    now - (p.meleeAt ?? -1000) < MELEE.interval * 1000 ||
     now - p.shotAt < w.interval * 1000 - 5 ||
     p.ammo[p.weapon] <= 0
   )
@@ -527,6 +530,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
   p.shotAt = now;
   const origin = [p.x, p.y - (p.crouching ? 0.65 : 0), p.z];
   let end: [number, number, number] = [p.x, p.y, p.z];
+  let centerEnd: [number, number, number] | undefined;
   const hits = new Map<
     string,
     {
@@ -568,6 +572,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
       origin[1] + dir[1] * nearest,
       origin[2] + dir[2] * nearest,
     ];
+    if (n === 0) centerEnd = end;
     if (target) {
       const headshot =
         end[1] - (target.y - 1.7) > (target.crouching ? 1.15 : 1.72);
@@ -594,7 +599,48 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
   }
   for (const [target, hit] of hits)
     event(room, { type: 'hit', player: p.id, target, ...hit, at: now });
-  event(room, { type: 'shot', player: p.id, end, at: now });
+  event(room, { type: 'shot', player: p.id, end: centerEnd ?? end, at: now });
+}
+function melee(room: Room, p: Member, now: number) {
+  if (
+    now - (p.meleeAt ?? -1000) < MELEE.interval * 1000 ||
+    now - p.shotAt < (WEAPONS[p.weapon]?.interval ?? 0.14) * 1000
+  )
+    return;
+  p.meleeAt = now;
+  p.reloadUntil = 0;
+  cancelRecovery(p);
+  const contact = meleeTarget(
+    { x: p.x, y: p.y - (p.crouching ? 0.65 : 0), z: p.z },
+    p.yaw,
+    p.pitch,
+    room.players
+      .filter(
+        (q) =>
+          q.id !== p.id &&
+          q.health > 0 &&
+          !q.spectator &&
+          !teammates(room, p, q),
+      )
+      .map((q) => meleeBody(q.id, q.x, q.y, q.z, q.crouching, q.downed)),
+    MAP.colliders,
+  );
+  event(room, { type: 'melee', player: p.id, end: contact?.point, at: now });
+  if (!contact) return;
+  const target = room.players.find((q) => q.id === contact.id)!;
+  const shield = target.shield,
+    amount = Math.min(MELEE.damage, target.health + shield);
+  damageMember(room, target, amount, now, p);
+  event(room, {
+    type: 'hit',
+    player: p.id,
+    target: target.id,
+    amount,
+    shieldDamage: Math.min(shield, amount),
+    shieldBreak: shield > 0 && amount >= shield,
+    headshot: false,
+    at: now,
+  });
 }
 export function applyCommand(
   room: Room,
@@ -759,14 +805,19 @@ export function applyCommand(
     p.reviveUntil = now + 4000;
     return;
   }
-  if (['shoot', 'reload', 'heal', 'pickup'].includes(command.type))
+  if (['shoot', 'melee', 'reload', 'heal', 'pickup'].includes(command.type))
     stopRevive(p);
   if (command.type === 'cancelHeal') cancelRecovery(p);
   if (command.type === 'heal' && beginRecovery(p, command.item, now))
     p.reloadUntil = 0;
-  if (command.type === 'pose' || command.type === 'shoot')
+  if (
+    command.type === 'pose' ||
+    command.type === 'shoot' ||
+    command.type === 'melee'
+  )
     move(p, command.pose, now);
   if (command.type === 'shoot') shoot(room, p, command.aiming, now);
+  if (command.type === 'melee') melee(room, p, now);
   if (
     command.type === 'reload' &&
     p.weapon >= 0 &&
@@ -893,9 +944,13 @@ export function parseCommand(value: unknown): Command {
   )
     return { type: 'mark', point: c.point, label: c.label };
   if (
-    (c.type === 'pose' || c.type === 'shoot' || c.type === 'mantle') &&
+    (c.type === 'pose' ||
+      c.type === 'shoot' ||
+      c.type === 'mantle' ||
+      c.type === 'melee') &&
     validPose(c.pose)
   ) {
+    if (c.type === 'melee') return { type: 'melee', pose: c.pose };
     if (c.type === 'mantle') return { type: 'mantle', pose: c.pose };
     return c.type === 'pose'
       ? { type: 'pose', pose: c.pose }
