@@ -102,6 +102,7 @@ const controls = [
   ['C / CTRL', 'Toggle crouch / hold crouch'],
   ['SPACE', 'Jump / mantle nearby cover'],
   ['R', 'Reload'],
+  ['V', 'Switch first / third person'],
   ['E', 'Collect / revive teammate'],
   ['G / Middle click', 'Ping enemy, loot, or location'],
   ['Q / F', 'Use medkit / shield cell'],
@@ -1187,7 +1188,10 @@ export default function Home() {
                 aria-label="Fire weapon"
                 onPointerDown={(e) => {
                   e.currentTarget.setPointerCapture(e.pointerId);
-                  if (game.current) game.current.shooting = true;
+                  if (game.current) {
+                    game.current.triggerHeld = false;
+                    game.current.shooting = true;
+                  }
                 }}
                 onPointerUp={() => {
                   if (game.current) game.current.shooting = false;
@@ -1473,6 +1477,19 @@ export default function Home() {
           )}
           {panel === 'settings' && (
             <div className="settings-content">
+              <div className="setting-row">
+                <div>
+                  <label htmlFor="perspective-switch">Third-person view</label>
+                  <p>Shoulder camera · Press V to switch during a match</p>
+                </div>
+                <Switch
+                  id="perspective-switch"
+                  checked={state.perspective === 'third'}
+                  onCheckedChange={(v) =>
+                    game.current?.setPerspective(v ? 'third' : 'first')
+                  }
+                />
+              </div>
               <div className="setting-label">
                 <span id="sensitivity-label">Look sensitivity</span>
                 <span>{sensitivity.toFixed(1)}×</span>

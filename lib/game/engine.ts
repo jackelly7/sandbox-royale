@@ -1,3 +1,6 @@
+import { shoulderCamera, convergedAim } from './camera-rig.ts';
+import { FEEL, reloadMotion, animateWeapon } from './weapon-feel.ts';
+import { WeaponAudio } from './weapon-audio.ts';
 import {
   floorAvailable,
   floorRarity,
@@ -71,6 +74,7 @@ export type GameState = RecoveryState & {
   weapon: number;
   owned: boolean[];
   tiers?: number[];
+  perspective?: 'first' | 'third';
   crouching?: boolean;
   sprinting?: boolean;
   mantling?: boolean;
@@ -261,6 +265,15 @@ export class BattleGame {
   measuredAt = 0;
   resolutionScale = 1;
   slowSamples = 0;
+  perspective: 'first' | 'third' = 'first';
+  avatar?: THREE.Group;
+  weaponAudio?: WeaponAudio;
+  triggerHeld = false;
+  lastShotAt = -100;
+  shotWeapon = -1;
+  actionPlayed = true;
+  reloadCue = 0;
+  viewKick = 0;
   shooting = false;
   aiming = false;
   cooldown = 0;
@@ -337,11 +350,17 @@ export class BattleGame {
     this.scene.add(this.parachute);
     this.parachute.visible = false;
     this.buildGun();
+    try {
+      if (localStorage.getItem('sandbox-perspective') === 'third')
+        this.perspective = 'third';
+    } catch {}
+    this.state.perspective = this.perspective;
     this.resetBots();
     this.bind();
     this.observer = new ResizeObserver(() => this.resize());
     this.observer.observe(container);
     this.resize();
+    this.emit();
     this.frame = requestAnimationFrame(this.tick);
   }
   material(
@@ -915,6 +934,7 @@ export class BattleGame {
       this.state.health > 0 &&
       index >= 0 &&
       this.state.owned[index] &&
+      !this.thirdPerson() &&
       !(this.aiming && index === 2) &&
       !this.isDowned();
     this.gunModels?.forEach((model, i) => {
@@ -1061,6 +1081,8 @@ export class BattleGame {
         e.preventDefault();
       this.keys.add(e.code);
       if (e.code === 'KeyR') this.reload();
+      if (!e.repeat && e.code === 'KeyV')
+        this.setPerspective(this.perspective === 'third' ? 'first' : 'third');
       if (!e.repeat && e.code === 'KeyE') this.interact();
       if (!e.repeat && e.code === 'KeyG') this.mark();
       if (!e.repeat && e.code === 'KeyQ') this.heal('medkit');
@@ -1098,7 +1120,10 @@ export class BattleGame {
     }) as EventListener);
     on(this.renderer.domElement, 'mousedown', ((e: MouseEvent) => {
       if (this.state.phase === 'playing') {
-        if (e.button === 0) this.shooting = true;
+        if (e.button === 0) {
+          this.triggerHeld = false;
+          this.shooting = true;
+        }
         if (e.button === 2) this.setAiming(true);
         if (e.button === 1) {
           e.preventDefault();
@@ -1106,9 +1131,12 @@ export class BattleGame {
         }
       }
     }) as EventListener);
-    on(document, 'mouseup', (() => {
-      this.shooting = false;
-      if (!this.touch) this.setAiming(false);
+    on(document, 'mouseup', ((e: MouseEvent) => {
+      if (e.button === 0) {
+        this.shooting = false;
+        this.triggerHeld = false;
+      }
+      if (e.button === 2 && !this.touch) this.setAiming(false);
     }) as EventListener);
     on(this.renderer.domElement, 'contextmenu', (e: Event) =>
       e.preventDefault(),
@@ -1234,21 +1262,181 @@ export class BattleGame {
     this.sound(650, 0.08, 0.035, 'sine');
     this.notice(`${label} marked`);
   }
+  thirdPerson() {
+    return (
+      this.perspective === 'third' && !(this.aiming && this.state.weapon === 2)
+    );
+  }
+  setPerspective(value: 'first' | 'third') {
+    this.perspective = value;
+    this.state.perspective = value;
+    try {
+      if (typeof window !== 'undefined')
+        window.localStorage.setItem('sandbox-perspective', value);
+    } catch {}
+    this.showWeapon();
+    if (this.avatar) this.avatar.visible = false;
+    this.emit();
+  }
+  updatePlayerCamera() {
+    const eye = this.position.clone();
+    eye.y -= this.crouchOffset || 0;
+    if (this.isDowned()) eye.y -= 0.95;
+    const pitch = THREE.MathUtils.clamp(
+      this.pitch + (this.viewKick || 0),
+      -1.35,
+      1.35,
+    );
+    let distance = 0;
+    if (this.thirdPerson()) {
+      const view = shoulderCamera(
+        eye,
+        this.yaw,
+        pitch,
+        this.aiming,
+        this.colliders,
+      );
+      this.camera.position.copy(view.position);
+      this.camera.lookAt(view.target);
+      distance = view.distance;
+    } else {
+      this.camera.position.copy(eye);
+      this.camera.rotation.set(pitch, this.yaw, 0, 'YXZ');
+    }
+    if (this.thirdPerson() && !this.avatar) {
+      this.avatar = characterModel(0);
+      this.scene.add(this.avatar);
+    }
+    if (this.avatar) {
+      this.avatar.visible = this.thirdPerson() && distance > 0.85;
+      if (this.avatar.visible) {
+        const me = this.networkRoom?.players.find(
+          (p) => p.id === this.network?.playerId,
+        );
+        setCharacterSkin(this.avatar, me ? skinIndex(me.name) : 0);
+        this.avatar.position.copy(this.position).y -= 1.7;
+        this.avatar.rotation.set(0, this.yaw + Math.PI, 0);
+        this.avatar.scale.set(
+          1,
+          this.isDowned() ? 0.38 : 1 - ((this.crouchOffset || 0) / 0.65) * 0.34,
+          1,
+        );
+        animateCharacter(
+          this.avatar,
+          this.time * (this.state.sprinting ? 13 : 10),
+          Math.min((this.motion?.length() ?? 0) / MOVE.run, 1) * 0.5,
+        );
+        const index = this.state.weapon,
+          tier = this.state.tiers?.[index] ?? 0;
+        let held = this.avatar.getObjectByName('Player weapon');
+        if (
+          index >= 0 &&
+          (!held ||
+            held.userData.weapon !== index ||
+            held.userData.rarity !== tier)
+        ) {
+          if (held) {
+            held.removeFromParent();
+            this.disposeObject(held);
+          }
+          held = weaponModel(index, 'world', tier);
+          held.name = 'Player weapon';
+          held.userData.weapon = index;
+          held.scale.setScalar(0.8);
+          this.avatar.add(held);
+        }
+        if (held) {
+          held.visible = index >= 0 && !this.isDowned() && !this.state.dropping;
+          const reload =
+            this.reloadTimer > 0 && index >= 0
+              ? 1 - this.reloadTimer / WEAPONS[index].reload
+              : 0;
+          const pose = reloadMotion(index, reload);
+          held.position.set(0.35 + pose.x, 1.35 + pose.y, 0.25 - this.recoil);
+          held.rotation.set(
+            -this.pitch + pose.rx + this.recoil * 0.45,
+            Math.PI,
+            pose.rz,
+          );
+          if (held.visible) {
+            const right = this.avatar.getObjectByName('Right arm');
+            const left = this.avatar.getObjectByName('Left arm');
+            if (right) right.rotation.x = -1.15 - this.pitch;
+            if (left) left.rotation.x = -0.95 - this.pitch + pose.work * 0.7;
+          }
+        }
+      }
+    }
+  }
+  playWeapon(index: number, source?: THREE.Vector3) {
+    if (this.muted || !this.audio || index < 0 || index > 2) return;
+    this.weaponAudio ??= new WeaponAudio(this.audio);
+    const delta = source?.clone().sub(this.camera.position);
+    const distance = delta?.length() ?? 0;
+    const pan = delta
+      ? delta
+          .normalize()
+          .dot(new THREE.Vector3(Math.cos(this.yaw), 0, -Math.sin(this.yaw)))
+      : 0;
+    this.weaponAudio.shot(index, distance, pan);
+  }
+  weaponClick(index: number, phase = 0) {
+    if (this.muted || !this.audio) return;
+    this.weaponAudio ??= new WeaponAudio(this.audio);
+    this.weaponAudio.mechanical(index, phase);
+  }
+  updateWeaponFeel() {
+    const i = this.state.weapon;
+    if (i < 0) return;
+    const progress =
+      this.reloadTimer > 0
+        ? Math.max(0, 1 - this.reloadTimer / WEAPONS[i].reload)
+        : null;
+    if (progress !== null) {
+      const cues = i === 1 ? [0.15, 0.4, 0.65, 0.9] : [0.12, 0.55, 0.87];
+      while (this.reloadCue < cues.length && progress >= cues[this.reloadCue]) {
+        this.weaponClick(i, this.reloadCue === cues.length - 1 ? 2 : 0);
+        this.reloadCue++;
+      }
+    }
+    const since = this.time - this.lastShotAt;
+    if (
+      !this.actionPlayed &&
+      this.shotWeapon === i &&
+      progress === null &&
+      since >= 0.24
+    ) {
+      if (i > 0) this.weaponClick(i, 2);
+      this.actionPlayed = true;
+    }
+    const pose = reloadMotion(i, progress ?? 0);
+    this.gun.position.x += pose.x;
+    this.gun.position.y += pose.y;
+    this.gun.position.z += pose.z;
+    this.gun.rotation.set(pose.rx + this.recoil * 0.45, 0, pose.rz);
+    const model = this.gunModels?.[i];
+    if (model)
+      animateWeapon(model, i, progress, this.shotWeapon === i ? since : 100);
+  }
   setAiming(aiming: boolean) {
     this.aiming =
       aiming &&
       this.state.phase === 'playing' &&
       this.state.weapon >= 0 &&
       !this.state.healing &&
+      !this.state.reloading &&
       !this.state.dropping &&
       !this.isDowned();
     this.showWeapon();
     this.emit();
   }
   look(x: number, y: number) {
-    this.yaw -= x * 0.002 * this.sensitivity;
+    const speed =
+      this.sensitivity *
+      (this.aiming ? (this.state.weapon === 2 ? 0.45 : 0.7) : 1);
+    this.yaw -= x * 0.002 * speed;
     this.pitch = THREE.MathUtils.clamp(
-      this.pitch - y * 0.002 * this.sensitivity,
+      this.pitch - y * 0.002 * speed,
       -1.35,
       1.35,
     );
@@ -1415,7 +1603,10 @@ export class BattleGame {
     this.network?.send({ type: 'reload' });
     this.reloadTimer = w.reload;
     this.state.reloading = true;
-    this.sound(160, 0.12, 0.04, 'triangle');
+    this.reloadCue = 0;
+    this.actionPlayed = true;
+    this.setAiming(false);
+    this.weaponClick(i);
     this.emit();
   }
   pickup() {
@@ -1625,27 +1816,49 @@ export class BattleGame {
       this.reload();
       return;
     }
+    if (i > 0 && this.triggerHeld) return;
+    this.triggerHeld = true;
     this.weaponAmmo[i]--;
     this.cooldown = w.interval;
-    this.recoil = 0.095;
+    this.recoil = FEEL[i].kick;
+    this.lastShotAt = this.time;
+    this.shotWeapon = i;
+    this.actionPlayed = false;
     this.flash.visible = true;
-    this.sound(i === 1 ? 90 : 170, 0.1, 0.055);
+    this.playWeapon(i);
     this.scene.updateMatrixWorld(true);
+    let hit = false;
+    const origin = this.camera.getWorldPosition(new THREE.Vector3());
+    const direction = this.camera.getWorldDirection(new THREE.Vector3());
+    let aim = convergedAim(origin, origin.clone().add(direction));
+    const enemies = this.bots.filter((b) => b.hp > 0).map((b) => b.mesh);
+    if (this.thirdPerson()) {
+      this.ray.set(origin, direction);
+      const target =
+        this.ray.intersectObjects([...this.solids, ...enemies], true)[0]
+          ?.point ?? origin.clone().addScaledVector(direction, w.range);
+      origin.copy(this.position);
+      origin.y -= this.state.crouching ? 0.65 : 0;
+      aim = convergedAim(origin, target);
+    }
     if (this.network)
       this.network.send({
         type: 'shoot',
-        pose: this.pose(),
+        pose: { ...this.pose(), yaw: aim.yaw, pitch: aim.pitch },
         aiming: this.aiming,
       });
-    let hit = false;
-    const aim = this.camera.getWorldDirection(new THREE.Vector3());
-    const aimYaw = Math.atan2(-aim.x, -aim.z),
-      aimPitch = Math.asin(aim.y);
+    this.viewKick = Math.min(0.06, (this.viewKick || 0) + FEEL[i].view);
     for (let p = 0; p < w.pellets; p++) {
       this.ray.set(
-        this.camera.getWorldPosition(new THREE.Vector3()),
+        origin,
         new THREE.Vector3(
-          ...shotDirection(aimYaw, aimPitch, this.state.weapon, this.aiming, p),
+          ...shotDirection(
+            aim.yaw,
+            aim.pitch,
+            this.state.weapon,
+            this.aiming,
+            p,
+          ),
         ),
       );
       const enemies = this.bots.filter((b) => b.hp > 0).map((b) => b.mesh);
@@ -1686,7 +1899,9 @@ export class BattleGame {
         : this.ray.ray.at(w.range, new THREE.Vector3());
       if (p === 0)
         this.tracer(
-          this.camera.localToWorld(new THREE.Vector3(0.2, -0.17, -0.7)),
+          this.thirdPerson()
+            ? origin
+            : this.camera.localToWorld(new THREE.Vector3(0.2, -0.17, -0.7)),
           end,
           '#ffe9a8',
         );
@@ -2007,6 +2222,7 @@ export class BattleGame {
           b.ammunition = Math.max(0, (b.ammunition ?? 90) - 1);
           if (b.ammunition === 0) b.armed = false;
           this.tracer(from, target, '#ff9c73');
+          this.playWeapon(weapon, from);
           if (b.target === -1) this.incomingFire(from);
           if (Math.random() < (distance < 18 ? 0.68 : 0.38)) {
             const amount =
@@ -2114,6 +2330,8 @@ export class BattleGame {
     this.state.feed = (this.state.feed ?? []).filter(
       (e) => this.time - e.at < 7,
     );
+    if (this.avatar && this.state.phase !== 'playing')
+      this.avatar.visible = false;
     if (this.state.phase === 'lobby') {
       const t = window.matchMedia('(prefers-reduced-motion: reduce)').matches
         ? 0
@@ -2141,7 +2359,9 @@ export class BattleGame {
       );
       this.storm.scale.set(this.state.storm, 1, this.state.storm);
       this.cooldown = Math.max(0, this.cooldown - dt);
-      this.recoil = Math.max(0, this.recoil - dt * 0.65);
+      this.recoil *= Math.exp(-dt * 18);
+      this.viewKick *= Math.exp(-dt * 12);
+      if (!this.shooting) this.triggerHeld = false;
       this.state.hit = Math.max(0, this.state.hit - dt);
       this.state.hurt = Math.max(0, this.state.hurt - dt);
       if (this.reloadTimer > 0) {
@@ -2269,16 +2489,15 @@ export class BattleGame {
       this.crouchOffset +=
         ((this.state.crouching ? 0.65 : 0) - this.crouchOffset) *
         (1 - Math.exp(-dt * 18));
-      this.camera.position.copy(this.position);
-      this.camera.position.y -= this.crouchOffset;
-      if (this.isDowned()) this.camera.position.y -= 0.95;
-      this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
+      this.updatePlayerCamera();
       this.camera.fov = THREE.MathUtils.lerp(
         this.camera.fov,
         this.aiming
           ? this.state.weapon === 2
             ? 28
-            : 45
+            : this.thirdPerson()
+              ? 58
+              : 45
           : this.state.sprinting
             ? 78
             : 72,
@@ -2293,13 +2512,11 @@ export class BattleGame {
             0.009,
         -0.5 + this.recoil,
       );
-      this.gun.rotation.set(
-        this.reloadTimer > 0 ? -0.6 : 0,
-        0,
-        this.reloadTimer > 0 ? -0.45 : 0,
-      );
+      this.updateWeaponFeel();
       this.gun.scale.setScalar(1);
-      this.flash.visible = this.recoil > 0.075;
+      this.flash.visible =
+        this.time - this.lastShotAt < 0.045 &&
+        this.shotWeapon === this.state.weapon;
       if (this.shooting) this.shoot();
       this.state.outside = outsideZone(
         this.position.x,
@@ -2336,6 +2553,30 @@ export class BattleGame {
             this.time * 9,
             b.mesh.position.distanceToSquared(target) > 0.001 ? 0.25 : 0,
           );
+          const held = b.mesh.getObjectByName('Bot weapon');
+          if (held?.visible) {
+            const index = held.userData.weapon;
+            const remaining = Math.max(
+              0,
+              (b.mesh.userData.reloadEnd ?? 0) - this.time,
+            );
+            const pose = reloadMotion(
+              index,
+              remaining > 0 ? 1 - remaining / WEAPONS[index].reload : 0,
+            );
+            held.position.set(0.35 + pose.x, 1.35 + pose.y, 0.25);
+            held.rotation.set(
+              -(b.mesh.userData.pitch ?? 0) + pose.rx,
+              Math.PI,
+              pose.rz,
+            );
+            const right = b.mesh.getObjectByName('Right arm'),
+              left = b.mesh.getObjectByName('Left arm');
+            if (right) right.rotation.x = -1.15 - (b.mesh.userData.pitch ?? 0);
+            if (left)
+              left.rotation.x =
+                -0.95 - (b.mesh.userData.pitch ?? 0) + pose.work * 0.7;
+          }
         }
       });
       this.networkTime += dt;
@@ -2629,6 +2870,9 @@ export class BattleGame {
         b.name = label;
         if (b.tag) b.tag.material.color.set(teammate ? '#7effd1' : '#ffffff');
       }
+      b.mesh.userData.reloadEnd =
+        this.time + Math.max(0, (p.reloadUntil - room.now) / 1000);
+      b.mesh.userData.pitch = p.pitch;
       let held = b.mesh.getObjectByName('Bot weapon');
       if (
         p.weapon >= 0 &&
@@ -2733,7 +2977,10 @@ export class BattleGame {
     if (me.health <= 0) this.gun.visible = false;
     this.weaponAmmo = [...me.ammo];
     this.reserveAmmo = [...me.reserve];
+    const wasReloading = this.state.reloading;
     this.state.reloading = me.reloadUntil > room.now;
+    this.reloadTimer = Math.max(0, (me.reloadUntil - room.now) / 1000);
+    if (this.state.reloading && !wasReloading) this.reloadCue = 0;
     room.loot.forEach((used, i) => {
       if (this.loot[i]) {
         this.loot[i].used = used;
@@ -2759,6 +3006,7 @@ export class BattleGame {
         if (p) {
           const from = new THREE.Vector3(p.x, p.y, p.z),
             end = new THREE.Vector3(...e.end);
+          this.playWeapon(p.weapon, from);
           if (
             me.health > 0 &&
             new THREE.Line3(from, end)

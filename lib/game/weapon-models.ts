@@ -21,8 +21,10 @@ function buildWeaponModel(
     box(0.185, 0.105, 0.32, accent, 0, 0.08, -0.22, 0.025);
     tube(0.029, 0.38, edge, 0, 0.025, -0.55);
     tube(0.044, 0.075, black, 0, 0.025, -0.76);
-    box(0.125, 0.27, 0.14, edge, 0, -0.19, -0.09, 0.025).rotation.x = 0.22;
-    box(0.13, 0.025, 0.145, accent, 0, -0.33, -0.12);
+    if (detail === 'world') {
+      box(0.125, 0.27, 0.14, edge, 0, -0.19, -0.09, 0.025).rotation.x = 0.22;
+      box(0.13, 0.025, 0.145, accent, 0, -0.33, -0.12);
+    }
     box(0.1, 0.22, 0.11, black, 0, -0.16, 0.18).rotation.x = -0.25;
     box(0.145, 0.17, 0.28, dark, 0, -0.015, 0.41, 0.03);
     box(0.16, 0.18, 0.045, black, 0, -0.015, 0.55);
@@ -41,14 +43,13 @@ function buildWeaponModel(
     tube(0.055, 0.7, edge, 0, 0.05, -0.46);
     tube(0.043, 0.54, dark, 0, -0.06, -0.38);
     tube(0.039, 0.012, black, 0, 0.05, -0.817);
-    box(0.215, 0.13, 0.23, accent, 0, -0.04, -0.28, 0.025);
+    if (detail === 'world')
+      box(0.215, 0.13, 0.23, accent, 0, -0.04, -0.28, 0.025);
     box(0.16, 0.21, 0.39, '#b97745', 0, -0.055, 0.41, 0.035);
     box(0.18, 0.23, 0.045, black, 0, -0.055, 0.61);
     box(0.014, 0.09, 0.14, black, 0.112, 0.02, 0.06);
     box(0.035, 0.045, 0.035, '#fc8461', 0, 0.115, -0.755);
     if (detail === 'held') {
-      for (let i = 0; i < 4; i++)
-        box(0.226, 0.017, 0.021, dark, 0, 0.032, -0.36 + i * 0.048);
       for (let i = 0; i < 3; i++)
         tube(
           0.026,
@@ -77,12 +78,32 @@ function buildWeaponModel(
     if (detail === 'held') {
       tube(0.036, 0.065, edge, 0, 0.34, -0.04).rotation.x = 0;
       box(0.08, 0.02, 0.07, black, 0, 0.376, -0.04);
-      box(0.06, 0.025, 0.035, edge, 0.09, 0.04, 0.14);
-      tube(0.03, 0.035, black, 0.12, 0.025, 0.14);
       box(0.007, 0.008, 0.045, pale, 0.049, 0.318, -0.27).rotation.z = -0.5;
     }
   }
   const root = k.finish();
+  if (detail === 'held') {
+    const action = modelKit('Action');
+    if (index === 0) {
+      action.box(0.125, 0.27, 0.14, edge, 0, -0.19, -0.09, 0.025).rotation.x =
+        0.22;
+      action.box(0.13, 0.025, 0.145, accent, 0, -0.33, -0.12);
+    } else if (index === 1) {
+      action.box(0.215, 0.13, 0.23, accent, 0, -0.04, -0.28, 0.025);
+      for (let i = 0; i < 4; i++)
+        action.box(0.226, 0.017, 0.021, dark, 0, 0.032, -0.36 + i * 0.048);
+      const shell = modelKit('Reload shell');
+      shell.tube(0.027, 0.11, '#dc8053');
+      shell.tube(0.03, 0.025, '#ecd399', 0, 0, 0.055);
+      const model = shell.finish();
+      model.visible = false;
+      root.add(model);
+    } else {
+      action.box(0.06, 0.025, 0.035, edge, 0.09, 0.04, 0.14);
+      action.tube(0.03, 0.035, black, 0.12, 0.025, 0.14);
+    }
+    root.add(action.finish());
+  }
   root.userData.detail = detail;
   root.userData.rarity = rarity;
   return root;

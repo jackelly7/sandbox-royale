@@ -461,3 +461,123 @@ void test('solo elimination drops a bot weapon with its rarity even after damage
   assert.equal(game.loot.length, before + 1);
   game.disposeObject(game.scene);
 });
+
+void test('third-person fire converges from the body and cannot shoot past cover seen around by the camera', () => {
+  const game = arena();
+  game.resetBots();
+  game.bots.forEach((b, i) => {
+    if (i > 0) {
+      b.hp = 0;
+      b.mesh.visible = false;
+    }
+  });
+  const target = game.bots[0];
+  target.mesh.position.set(0, 0, 0);
+  game.perspective = 'third';
+  game.state.weapon = 0;
+  game.position.set(0, 1.7, 10);
+  game.camera.position.set(3, 2.2, 14);
+  game.camera.lookAt(0, 1.4, 0);
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(0.8, 3, 0.4),
+    new THREE.MeshBasicMaterial(),
+  );
+  wall.position.set(0, 1.5, 9);
+  game.world.add(wall);
+  game.solids.push(wall);
+  const before = target.hp + target.shield;
+  game.shoot();
+  assert.equal(
+    target.hp + target.shield,
+    before,
+    'The shoulder camera sees the rival but the body shot hits cover',
+  );
+  assert.ok(game.tracers[0].mesh.geometry.attributes.position.getZ(1) > 8);
+  game.solids = [];
+  wall.removeFromParent();
+  game.cooldown = 0;
+  game.shoot();
+  assert.ok(
+    target.hp + target.shield < before,
+    'Removing cover allows the converged shot to hit',
+  );
+});
+void test('AR repeats while held; shotgun and sniper require releasing the trigger', () => {
+  for (let i = 0; i < 3; i++) {
+    const game = arena();
+    game.state.weapon = i;
+    const before = game.weaponAmmo[i];
+    game.shoot();
+    game.cooldown = 0;
+    game.shoot();
+    assert.equal(game.weaponAmmo[i], before - (i === 0 ? 2 : 1));
+    game.triggerHeld = false;
+    game.cooldown = 0;
+    game.shoot();
+    assert.equal(game.weaponAmmo[i], before - (i === 0 ? 3 : 2));
+  }
+});
+void test('third person hides the first-person gun and scopes return to the chosen view', () => {
+  const game = arena();
+  game.motion = new THREE.Vector2();
+  game.crouchOffset = 0;
+  game.setPerspective('third');
+  assert.equal(game.gun.visible, false);
+  game.updatePlayerCamera();
+  assert.equal(game.avatar?.visible, true);
+  game.setAiming(true);
+  game.updatePlayerCamera();
+  assert.equal(game.thirdPerson(), false);
+  assert.equal(game.avatar?.visible, false);
+  assert.ok(game.camera.position.distanceTo(game.position) < 1e-10);
+  game.setAiming(false);
+  game.updatePlayerCamera();
+  assert.equal(game.thirdPerson(), true);
+  assert.equal(game.avatar?.visible, true);
+  game.setPerspective('first');
+  game.updatePlayerCamera();
+  assert.equal(game.avatar?.visible, false);
+  assert.equal(game.gun.visible, true);
+});
+
+void test('multiplayer shoulder shots send physical player coordinates and converged aim', () => {
+  const game = arena();
+  game.perspective = 'third';
+  game.state.weapon = 0;
+  game.state.crouching = true;
+  game.position.set(0, 1.7, 10);
+  game.camera.position.set(0.8, 1.5, 14);
+  game.camera.lookAt(0, 1, 0);
+  const target = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 2, 1),
+    new THREE.MeshBasicMaterial(),
+  );
+  target.position.set(0, 1, 0);
+  game.world.add(target);
+  game.solids.push(target);
+  const sent: import('../lib/game/multiplayer.ts').Command[] = [];
+  game.network = { playerId: 'local', send: (c) => sent.push(c) };
+  game.networkRoom = {
+    phase: 'playing',
+    players: [],
+    events: [],
+  } as unknown as import('../lib/game/multiplayer.ts').RoomSnapshot;
+  game.shoot();
+  const command = sent.find((c) => c.type === 'shoot');
+  assert.equal(command?.type, 'shoot');
+  if (command?.type !== 'shoot') return;
+  assert.equal(command.pose.x, game.position.x);
+  assert.equal(command.pose.z, game.position.z);
+  assert.equal(command.pose.y, game.position.y);
+  assert.equal(command.pose.crouching, true);
+  const direction = new THREE.Vector3(
+    -Math.sin(command.pose.yaw) * Math.cos(command.pose.pitch),
+    Math.sin(command.pose.pitch),
+    -Math.cos(command.pose.yaw) * Math.cos(command.pose.pitch),
+  );
+  const ray = new THREE.Raycaster(new THREE.Vector3(0, 1.05, 10), direction);
+  assert.ok(
+    ray.intersectObject(target).length > 0,
+    'Server aim starts at crouched eye and intersects the target',
+  );
+});

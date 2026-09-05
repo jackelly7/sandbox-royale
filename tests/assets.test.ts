@@ -68,6 +68,14 @@ void test('detailed assets and added cover stay within full-match rendering budg
     `Equipped limit 35000 with added cover (original ${priorEquippedTriangles}): ${JSON.stringify(equipped)}`,
   );
   assert.ok(equipped.calls < 200, JSON.stringify(equipped));
+  // Third person replaces the held gun with a five-part avatar and one world gun.
+  held.removeFromParent();
+  const avatar = characterModel(0);
+  avatar.add(weaponModel(0, 'world'));
+  game.world.add(avatar);
+  const thirdPerson = stats(game.world);
+  assert.ok(thirdPerson.calls < 200, JSON.stringify(thirdPerson));
+  assert.ok(thirdPerson.triangles < 35000, JSON.stringify(thirdPerson));
   console.log(
     'Asset budgets:',
     JSON.stringify({ empty, equipped, priorEquippedTriangles }),
