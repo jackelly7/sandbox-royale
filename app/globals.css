@@ -679,7 +679,7 @@ h1 > span {
 .crosshair > span:nth-child(2) {
   width: 1px;
   height: 4px;
-  left: 11.5px;
+  left: calc(50% - 0.5px);
 }
 .crosshair > span:nth-child(1) {
   top: 0;
@@ -691,7 +691,7 @@ h1 > span {
 .crosshair > span:nth-child(4) {
   height: 1px;
   width: 4px;
-  top: 11.5px;
+  top: calc(50% - 0.5px);
 }
 .crosshair > span:nth-child(3) {
   left: 0;
