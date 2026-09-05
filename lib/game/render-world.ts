@@ -1,3 +1,4 @@
+import { ARENA_SCALE } from './arena.ts';
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
@@ -6,7 +7,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 export function batchIsland(
   world: THREE.Group,
   dynamic: THREE.Object3D[],
-  cellSize = 45,
+  cellSize = 45 * ARENA_SCALE,
 ) {
   const excluded = new Set<THREE.Object3D>();
   dynamic.forEach((root) => root.traverse((object) => excluded.add(object)));

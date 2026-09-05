@@ -1,3 +1,4 @@
+import { ARENA_SCALE, ARENA_RADIUS } from '../lib/game/arena.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -150,8 +151,8 @@ void test('island batching removes most draw submissions without losing collisio
   const game = arena();
   game.buildWorld();
   const before = game.visible(
-    new THREE.Vector3(18, 2, 0),
-    new THREE.Vector3(18, 2, -40),
+    new THREE.Vector3(18 * ARENA_SCALE, 2, 0),
+    new THREE.Vector3(18 * ARENA_SCALE, 2, -40 * ARENA_SCALE),
   );
   const stats = batchIsland(
     game.world,
@@ -159,7 +160,10 @@ void test('island batching removes most draw submissions without losing collisio
   );
   assert.ok(stats.after < stats.before / 5, JSON.stringify(stats));
   assert.equal(
-    game.visible(new THREE.Vector3(18, 2, 0), new THREE.Vector3(18, 2, -40)),
+    game.visible(
+      new THREE.Vector3(18 * ARENA_SCALE, 2, 0),
+      new THREE.Vector3(18 * ARENA_SCALE, 2, -40 * ARENA_SCALE),
+    ),
     before,
   );
   assert.equal(before, false);
@@ -403,11 +407,14 @@ void test('solo bots target and shoot nearby rivals, with no preference for the 
 void test('new sand cover blocks bullets and movement while leaving loot accessible', () => {
   const game = arena();
   game.buildWorld();
-  const walls = game.world.children.filter((o) => o.name === 'Sand cover');
+  const walls: THREE.Object3D[] = [];
+  game.world.traverse((o) => {
+    if (o.name === 'Sand cover') walls.push(o);
+  });
   assert.equal(walls.length, 40);
   for (const wall of walls) {
     const b = new THREE.Box3().setFromObject(wall);
-    const p = wall.position;
+    const p = wall.getWorldPosition(new THREE.Vector3());
     assert.ok(game.blocked(p.x, p.z));
     const wide = b.max.x - b.min.x > b.max.z - b.min.z;
     const from = new THREE.Vector3(
@@ -628,4 +635,32 @@ void test('bullet effects mark actual endpoints, show every shotgun pellet, and 
     );
   assert.equal(game.tracers.length, 96);
   assert.equal(game.tracers[0].mesh.children.length, 2);
+});
+
+void test('expanded island permits movement beyond the old rim and resets loot at the same positions', () => {
+  const game = arena();
+  game.buildWorld();
+  const p = new THREE.Vector3(0, 1.7, 170);
+  game.move(p, 0, 2);
+  assert.equal(p.z, 172);
+  game.move(p, 0, 30);
+  assert.ok(p.length() <= ARENA_RADIUS + 0.1);
+  const outer = game.colliders.find(
+    (b) =>
+      b.getCenter(new THREE.Vector3()).length() > 130 && b.max.x - b.min.x < 4,
+  )!;
+  const center = outer.getCenter(new THREE.Vector3());
+  const landing = game.safePosition(center.x, center.z);
+  assert.ok(Math.hypot(landing.x - center.x, landing.z - center.z) < 10);
+  assert.ok(Math.hypot(landing.x, landing.z) > 110);
+  const positions = game.loot.map((l) => [
+    l.mesh.position.x,
+    l.mesh.position.z,
+  ]);
+  assert.ok(positions.some(([x, z]) => Math.hypot(x, z) > 110));
+  game.spawnLoot();
+  assert.deepEqual(
+    game.loot.map((l) => [l.mesh.position.x, l.mesh.position.z]),
+    positions,
+  );
 });

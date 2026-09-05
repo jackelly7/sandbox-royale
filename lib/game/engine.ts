@@ -1,3 +1,10 @@
+import {
+  ARENA_SCALE,
+  ARENA_RADIUS,
+  INITIAL_CIRCLE,
+  SPAWN_RADIUS,
+} from './arena.ts';
+import { MAP } from './map-data.ts';
 import { MELEE, meleeTarget, meleeBody } from './melee.ts';
 import {
   bulletTrail,
@@ -162,7 +169,13 @@ export const landmarks = [
   { x: 30, z: 20, w: 12, d: 10, name: 'BLOCK FORT' },
   { x: -35, z: 28, w: 12, d: 10, name: 'TOY GROVE' },
   { x: 2, z: -57, w: 12, d: 9, name: 'NORTH RIM' },
-];
+].map((p) => ({
+  ...p,
+  x: p.x * ARENA_SCALE,
+  z: p.z * ARENA_SCALE,
+  w: p.w * ARENA_SCALE,
+  d: p.d * ARENA_SCALE,
+}));
 const names = [
   'Kestrel',
   'Ghostwave',
@@ -227,7 +240,7 @@ export class BattleGame {
     weapon: -1,
     owned: [false, false, false],
     elapsed: 0,
-    storm: 107,
+    storm: INITIAL_CIRCLE,
     outside: false,
     reloading: false,
     aiming: false,
@@ -257,7 +270,7 @@ export class BattleGame {
   flash!: THREE.Mesh;
   keys = new Set<string>();
   ray = new THREE.Raycaster();
-  position = new THREE.Vector3(0, 1.7, 50);
+  position = new THREE.Vector3(0, 1.7, SPAWN_RADIUS);
   yaw = 0;
   pitch = 0;
   velocityY = 0;
@@ -333,7 +346,7 @@ export class BattleGame {
     this.renderer.toneMappingExposure = 1.3;
     container.appendChild(this.renderer.domElement);
     this.scene.background = new THREE.Color('#9bc9d2');
-    this.scene.fog = new THREE.Fog('#9bc9d2', 115, 340);
+    this.scene.fog = new THREE.Fog('#9bc9d2', 115 * ARENA_SCALE, 450);
     this.scene.add(this.world);
     this.scene.add(this.camera);
     this.scene.add(new THREE.HemisphereLight('#d6f8ff', '#869852', 2.5));
@@ -700,11 +713,35 @@ export class BattleGame {
     }
     this.storm = stormWall();
     this.storm.position.y = 24;
-    this.storm.scale.set(107, 1, 107);
+    this.storm.scale.set(INITIAL_CIRCLE, 1, INITIAL_CIRCLE);
     this.storm.visible = false;
     this.scene.add(this.storm);
-    this.spawnLoot();
+    this.spawnLoot(false);
     this.buildCover();
+    // Stretch only the island horizontally. Dynamic characters and loot keep their size.
+    const staticWorld = new THREE.Group();
+    staticWorld.name = 'Expanded sandbox';
+    const pickups = new Set<THREE.Object3D>(this.loot.map((l) => l.mesh));
+    if (this.lootInstances) pickups.add(this.lootInstances.root);
+    const scenery = this.world.children.filter(
+      (object) => !pickups.has(object),
+    );
+    for (const object of scenery) staticWorld.add(object);
+    staticWorld.scale.set(ARENA_SCALE, 1, ARENA_SCALE);
+    this.world.add(staticWorld);
+    for (const box of this.colliders) {
+      box.min.x *= ARENA_SCALE;
+      box.min.z *= ARENA_SCALE;
+      box.max.x *= ARENA_SCALE;
+      box.max.z *= ARENA_SCALE;
+    }
+    this.physicsCache = undefined;
+    for (const item of this.loot) {
+      item.mesh.position.x *= ARENA_SCALE;
+      item.mesh.position.z *= ARENA_SCALE;
+    }
+    this.rebuildLoot();
+    this.world.updateMatrixWorld(true);
   }
   buildCover() {
     // Short L-shaped sand walls break long sightlines, with two open exits.
@@ -790,7 +827,7 @@ export class BattleGame {
       this.world.add(leaf);
     }
   }
-  spawnLoot() {
+  spawnLoot(expanded = true) {
     if (this.lootInstances) {
       this.world.remove(this.lootInstances.root);
       this.disposeObject(this.lootInstances.root);
@@ -845,8 +882,8 @@ export class BattleGame {
     points.forEach(([x, z], i) => {
       const kind = i < 19 ? i % 5 : i < 43 ? (i - 19) % 3 : 3 + ((i - 43) % 2);
       this.addLoot({
-        x,
-        z,
+        x: expanded ? MAP.loot[i].x : x,
+        z: expanded ? MAP.loot[i].z : z,
         kind,
         rarity: floorRarity(i),
         used: !floorAvailable(i),
@@ -1031,7 +1068,7 @@ export class BattleGame {
       const tag = this.nameTag(names[i] ?? 'Player');
       if (tag) g.add(tag);
       const a = (i / count) * Math.PI * 2,
-        r = 48 + (i % 4) * 11;
+        r = (62 + (i % 4) * 9) * ARENA_SCALE;
       g.position.copy(this.safePosition(Math.sin(a) * r, Math.cos(a) * r));
       this.world.add(g);
       g.userData.bot = i;
@@ -1239,8 +1276,8 @@ export class BattleGame {
         ) ?? undefined;
     if (
       !point ||
-      point.distanceTo(this.position) > 180 ||
-      Math.hypot(point.x, point.z) > 110
+      point.distanceTo(this.position) > 180 * ARENA_SCALE ||
+      Math.hypot(point.x, point.z) > ARENA_RADIUS
     ) {
       this.notice('Aim at a nearby location to ping.');
       return;
@@ -1496,7 +1533,7 @@ export class BattleGame {
         weapon: -1,
         owned: [false, false, false],
         elapsed: 0,
-        storm: 107,
+        storm: INITIAL_CIRCLE,
         rank: 16,
         notice: 'Find a weapon drop. Press E to collect it.',
         hit: 0,
@@ -1513,7 +1550,7 @@ export class BattleGame {
       this.crouchToggle = false;
       this.crouchOffset = 0;
       this.motion?.set(0, 0);
-      this.position.set(0, DROP_HEIGHT, 50);
+      this.position.set(0, DROP_HEIGHT, SPAWN_RADIUS);
       this.yaw = 0;
       this.pitch = -0.6;
       this.velocityY = 0;
@@ -2179,7 +2216,7 @@ export class BattleGame {
         const a = (i * Math.PI) / 6,
           nx = x + Math.cos(a) * r,
           nz = z + Math.sin(a) * r;
-        if (Math.hypot(nx, nz) < 104 && !this.blocked(nx, nz))
+        if (Math.hypot(nx, nz) < ARENA_RADIUS - 6 && !this.blocked(nx, nz))
           return new THREE.Vector3(nx, 0, nz);
       }
     return new THREE.Vector3(0, 0, 4);
@@ -2246,9 +2283,9 @@ export class BattleGame {
     )
       pos.z += dz;
     const length = Math.hypot(pos.x, pos.z);
-    if (length > 110) {
-      pos.x *= 110 / length;
-      pos.z *= 110 / length;
+    if (length > ARENA_RADIUS) {
+      pos.x *= ARENA_RADIUS / length;
+      pos.z *= ARENA_RADIUS / length;
     }
   }
   visible(from: THREE.Vector3, to: THREE.Vector3) {
@@ -2495,7 +2532,11 @@ export class BattleGame {
       const t = window.matchMedia('(prefers-reduced-motion: reduce)').matches
         ? 0
         : this.time * 0.025;
-      this.camera.position.set(83 + Math.sin(t) * 8, 55, 93 + Math.cos(t) * 8);
+      this.camera.position.set(
+        (83 + Math.sin(t) * 8) * ARENA_SCALE,
+        80,
+        (93 + Math.cos(t) * 8) * ARENA_SCALE,
+      );
       this.camera.lookAt(0, 2, -8);
     } else if (this.state.phase === 'playing') {
       if (!this.network) {
@@ -2684,7 +2725,7 @@ export class BattleGame {
         this.state.zone ?? { x: 0, z: 0, radius: this.state.storm },
       );
       if (this.state.outside && !this.network)
-        this.damage(dt * (this.state.elapsed > 180 ? 11 : 5));
+        this.damage(dt * (this.state.elapsed > 300 ? 11 : 5));
       if (this.state.phase === 'playing' && !this.network) this.updateBots(dt);
       if (
         this.state.phase === 'playing' &&

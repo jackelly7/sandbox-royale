@@ -80,3 +80,5 @@ Hosts choose free-for-all or Duos. Each player can select a team of up to two; a
 G or middle-click marks an enemy, loot, or location for eight seconds. The touch HUD has a ping button. Duo pings are filtered per authenticated player, never sent to opposing teams. Nearby moving enemies produce stereo footsteps and a directional ring around the crosshair; Visual footsteps can be toggled independently from audio in Settings.
 
 The arena uses sandy ground, wooden sandbox edges, sandcastle cover, and oversized toy buckets. Static geometry still batches down to roughly 60 draw submissions.
+
+The sandbox is 363 meters across its playable circle, with horizontal terrain scale 1.65. Player size, cover heights, weapon ranges, and movement speeds stay unchanged. Every room uses the full opening circle: 55 seconds to explore before the first closure, followed by off-center phases reaching the final circle after 335 seconds. Eliminations can end a round earlier. `node scripts/test-large-map.mjs` checks expanded movement, outer loot, and opening timings over real sockets.

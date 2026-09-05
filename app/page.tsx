@@ -1,5 +1,7 @@
 'use client';
 
+import { ARENA_SCALE, INITIAL_CIRCLE } from '../lib/game/arena';
+
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
@@ -79,7 +81,7 @@ const initial: GameState = {
   weapon: -1,
   owned: [false, false, false],
   elapsed: 0,
-  storm: 107,
+  storm: INITIAL_CIRCLE,
   outside: false,
   reloading: false,
   aiming: false,
@@ -114,12 +116,40 @@ const controls = [
 ];
 
 function IslandMap({
-  state,
+  state: worldState,
   large = false,
 }: {
   state: GameState;
   large?: boolean;
 }) {
+  const circle = (c: { x: number; z: number; radius: number }) => ({
+    ...c,
+    x: c.x / ARENA_SCALE,
+    z: c.z / ARENA_SCALE,
+    radius: c.radius / ARENA_SCALE,
+  });
+  const state = {
+    ...worldState,
+    x: worldState.x / ARENA_SCALE,
+    z: worldState.z / ARENA_SCALE,
+    storm: worldState.storm / ARENA_SCALE,
+    zone: worldState.zone
+      ? {
+          ...worldState.zone,
+          ...circle(worldState.zone),
+          next: circle(worldState.zone.next),
+        }
+      : undefined,
+    bots: worldState.bots.map((b) => ({
+      x: b.x / ARENA_SCALE,
+      z: b.z / ARENA_SCALE,
+    })),
+    pingPoints: worldState.pingPoints?.map((p) => ({
+      ...p,
+      x: p.x / ARENA_SCALE,
+      z: p.z / ARENA_SCALE,
+    })),
+  };
   return (
     <svg
       className={`${large ? 'island-map large' : 'island-map'} ${state.zone?.stage === 'closing' ? 'circle-closing' : ''}`}

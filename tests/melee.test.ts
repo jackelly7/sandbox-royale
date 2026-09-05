@@ -124,7 +124,7 @@ void test('server blocks punches through cover and while dropping, downed, spect
   const r = arena(),
     [a, b] = r.players;
   const wall = MAP.colliders.find(
-    (w) => w.max[2] - w.min[2] < 0.8 && w.max[1] > 2,
+    (w) => w.max[2] - w.min[2] < 1.1 && w.max[1] > 2,
   )!;
   a.x = b.x = (wall.min[0] + wall.max[0]) / 2;
   a.z = wall.max[2] + 0.55;

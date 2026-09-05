@@ -1,3 +1,4 @@
+import { INITIAL_CIRCLE } from '../lib/game/arena.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -52,7 +53,7 @@ void test('zone holds, closes continuously, and announces the exact next destina
     assert.equal(end.x, hold.next.x);
     assert.equal(end.z, hold.next.z);
   }
-  assert.equal(at, 152);
+  assert.equal(at, 335);
   assert.equal(zoneAt(900).stage, 'final');
   assert.equal(zoneAt(900).radius, 5);
 });
@@ -62,7 +63,7 @@ void test('multiplayer damage and snapshots use the same moving center', () => {
   room.phase = 'playing';
   room.startAt = 0;
   room.round = 1;
-  const now = 269000,
+  const now = 360000,
     zone = zoneAt(now / 1000, `${room.code}:${room.round}`);
   room.tickAt = now - 100;
   const [safe, exposed] = room.players;
@@ -75,10 +76,14 @@ void test('multiplayer damage and snapshots use the same moving center', () => {
   assert.deepEqual(snapshot(room, now).zone, zone);
 });
 
-void test('small rooms start tighter and reach meaningful circles earlier without jumping when players die', () => {
-  assert.equal(zoneAt(0, 'small', 2).radius, 78);
-  assert.equal(zoneAt(0, 'large', 16).radius, 107);
-  assert.equal(zoneAt(32, 'small', 2).radius, 48);
-  assert.ok(zoneAt(60, 'small', 2).radius <= 30);
-  assert.equal(zoneAt(122, 'small', 2).stage, 'final');
+void test('small friend matches get the full map and five-and-a-half-minute circle schedule', () => {
+  for (const players of [2, 4, 8, 16]) {
+    assert.equal(zoneAt(0, 'sandbox', players).radius, INITIAL_CIRCLE);
+    assert.equal(zoneAt(54, 'sandbox', players).stage, 'waiting');
+    assert.equal(zoneAt(55, 'sandbox', players).stage, 'closing');
+    assert.equal(zoneAt(100, 'sandbox', players).radius, 135);
+    assert.ok(zoneAt(122, 'sandbox', players).radius > 100);
+    assert.equal(zoneAt(334, 'sandbox', players).stage, 'closing');
+    assert.equal(zoneAt(335, 'sandbox', players).stage, 'final');
+  }
 });

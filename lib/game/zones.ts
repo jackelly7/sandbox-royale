@@ -1,3 +1,4 @@
+import { INITIAL_CIRCLE } from './arena.ts';
 import { MAP } from './map-data.ts';
 export type Circle = { x: number; z: number; radius: number };
 export type Zone = Circle & {
@@ -8,11 +9,11 @@ export type Zone = Circle & {
 };
 // Each phase announces its destination before the wall starts moving.
 export const ZONE_PHASES = [
-  { wait: 18, close: 22, radius: 78 },
-  { wait: 12, close: 22, radius: 53 },
-  { wait: 10, close: 20, radius: 32 },
-  { wait: 8, close: 18, radius: 16 },
-  { wait: 6, close: 16, radius: 5 },
+  { wait: 55, close: 45, radius: 135 },
+  { wait: 35, close: 40, radius: 100 },
+  { wait: 30, close: 35, radius: 65 },
+  { wait: 25, close: 30, radius: 32 },
+  { wait: 15, close: 25, radius: 5 },
 ];
 const plans = new Map<string, Circle[]>();
 export function zonePlan(seed: string, players = 16): Circle[] {
@@ -25,19 +26,9 @@ export function zonePlan(seed: string, players = 16): Circle[] {
     hash = (Math.imul(hash, 1664525) + 1013904223) >>> 0;
     return hash / 4294967296;
   };
-  const circles: Circle[] = [
-    { x: 0, z: 0, radius: players <= 4 ? 78 : players <= 8 ? 90 : 107 },
-  ];
-  for (const [i, original] of ZONE_PHASES.entries()) {
-    const phase = {
-      ...original,
-      radius:
-        players <= 4
-          ? [48, 30, 18, 10, 5][i]
-          : players <= 8
-            ? [62, 40, 24, 12, 5][i]
-            : original.radius,
-    };
+  const circles: Circle[] = [{ x: 0, z: 0, radius: INITIAL_CIRCLE }];
+  for (const original of ZONE_PHASES) {
+    const phase = original;
     const previous = circles[circles.length - 1];
     let next = { ...previous, radius: phase.radius };
     for (let attempt = 0; attempt < 64; attempt++) {
@@ -67,7 +58,7 @@ export function zonePlan(seed: string, players = 16): Circle[] {
 }
 export function zoneAt(elapsed: number, seed = 'sandbox', players = 16): Zone {
   const circles = zonePlan(seed, players);
-  const pace = players <= 4 ? 0.8 : players <= 8 ? 0.9 : 1;
+  const pace = 1;
   let time = Math.max(0, elapsed) / pace;
   for (let i = 0; i < ZONE_PHASES.length; i++) {
     const { wait, close } = ZONE_PHASES[i];

@@ -1,3 +1,8 @@
+import {
+  ARENA_SCALE,
+  ARENA_RADIUS,
+  INITIAL_CIRCLE,
+} from '../lib/game/arena.ts';
 import { floorAvailable } from '../lib/game/loot.ts';
 import { zoneAt } from '../lib/game/zones.ts';
 import test from 'node:test';
@@ -157,7 +162,7 @@ void test('server does not allow bullets through island buildings', () => {
   const room = started(),
     [p, target] = room.players;
   Object.assign(p, {
-    x: 18,
+    x: 18 * ARENA_SCALE,
     y: 1.7,
     z: 0,
     yaw: 0,
@@ -166,7 +171,7 @@ void test('server does not allow bullets through island buildings', () => {
     owned: [false, false, true],
     ammo: [0, 0, 5],
   });
-  Object.assign(target, { x: 18, y: 1.7, z: -40 });
+  Object.assign(target, { x: 18 * ARENA_SCALE, y: 1.7, z: -40 * ARENA_SCALE });
   applyCommand(room, p.id, { type: 'shoot', pose: p, aiming: true }, at + 5100);
   assert.equal(target.health, 100);
   assert.equal(target.shield, 50);
@@ -452,7 +457,13 @@ void test('killer identity remains available after transient elimination events 
 void test('storm damage allows healing to complete while lethal damage cancels it', () => {
   const room = started(),
     p = room.players[0];
-  Object.assign(p, { x: 109, z: 0, health: 50, shield: 0, medkits: 2 });
+  Object.assign(p, {
+    x: ARENA_RADIUS - 1,
+    z: 0,
+    health: 50,
+    shield: 0,
+    medkits: 2,
+  });
   applyCommand(room, p.id, { type: 'heal', item: 'medkit' }, at + 5100);
   advance(room, at + 5200);
   assert.equal(p.healing, 'medkit');
@@ -504,4 +515,21 @@ void test('server shotgun range is short while the same sightline permits rifle 
       `weapon ${weapon}, range ${distance}`,
     );
   }
+});
+
+void test('server accepts the expanded map while still rejecting travel beyond its rim', () => {
+  const room = started(),
+    p = room.players[0];
+  Object.assign(p, { x: 0, z: 170, y: 1.7 });
+  applyCommand(room, p.id, { type: 'pose', pose: { ...p, z: 172 } }, at + 6000);
+  assert.equal(p.z, 172);
+  Object.assign(p, { x: 0, z: ARENA_RADIUS - 1 });
+  applyCommand(
+    room,
+    p.id,
+    { type: 'pose', pose: { ...p, z: ARENA_RADIUS + 1 } },
+    at + 7000,
+  );
+  assert.equal(p.z, ARENA_RADIUS - 1);
+  assert.equal(snapshot(room, at + 7000).zone?.radius, INITIAL_CIRCLE);
 });

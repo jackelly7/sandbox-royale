@@ -1,3 +1,4 @@
+import { ARENA_RADIUS, ARENA_SCALE, SPAWN_RADIUS } from '../lib/game/arena.ts';
 import { MELEE, meleeTarget, meleeBody } from '../lib/game/melee.ts';
 import {
   floorAvailable,
@@ -91,15 +92,15 @@ export function blocked(x: number, z: number) {
 }
 export function safeSpawn(index: number, count: number) {
   const angle = (index / count) * Math.PI * 2;
-  const x = Math.sin(angle) * 62,
-    z = Math.cos(angle) * 62;
+  const x = Math.sin(angle) * SPAWN_RADIUS,
+    z = Math.cos(angle) * SPAWN_RADIUS;
   for (let r = 0; r <= 20; r += 2)
     for (let i = 0; i < 12; i++) {
       const nx = x + Math.cos((i * Math.PI) / 6) * r,
         nz = z + Math.sin((i * Math.PI) / 6) * r;
       if (!blocked(nx, nz)) return { x: nx, y: 1.7, z: nz };
     }
-  return { x: 0, y: 1.7, z: 50 };
+  return { x: 0, y: 1.7, z: SPAWN_RADIUS };
 }
 export function createMember(
   id: string,
@@ -357,7 +358,7 @@ export function advance(room: Room, now: number) {
     }
     if (outsideZone(p.x, p.z, zone)) {
       stopRevive(p);
-      p.health = Math.max(0, p.health - dt * (elapsed > 180 ? 11 : 5));
+      p.health = Math.max(0, p.health - dt * (elapsed > 300 ? 11 : 5));
       if (!p.health) eliminate(room, p, now);
     }
   }
@@ -415,10 +416,10 @@ export function safeLanding(x: number, z: number) {
     for (let i = 0; i < 16; i++) {
       const nx = x + Math.cos((i * Math.PI) / 8) * radius,
         nz = z + Math.sin((i * Math.PI) / 8) * radius;
-      if (Math.hypot(nx, nz) <= 109 && !blocked(nx, nz))
+      if (Math.hypot(nx, nz) <= ARENA_RADIUS - 1 && !blocked(nx, nz))
         return { x: nx, z: nz };
     }
-  return { x: 0, z: 50 };
+  return { x: 0, z: SPAWN_RADIUS };
 }
 function validPose(p: unknown): p is PlayerPose {
   if (!p || typeof p !== 'object') return false;
@@ -460,7 +461,10 @@ function move(p: Member, pose: PlayerPose, now: number) {
   const dx = pose.x - p.x,
     dz = pose.z - p.z,
     distance = Math.hypot(dx, dz);
-  if (distance <= p.credit && Math.hypot(pose.x, pose.z) <= 110.1) {
+  if (
+    distance <= p.credit &&
+    Math.hypot(pose.x, pose.z) <= ARENA_RADIUS + 0.1
+  ) {
     let clear = true;
     const steps = Math.max(1, Math.ceil(distance / 0.25));
     for (let i = 1; i <= steps && !p.dropping; i++)
@@ -751,7 +755,10 @@ export function applyCommand(
   if (room.phase !== 'playing' || p.health <= 0) return;
   if (command.type === 'mark') {
     if (now - (p.lastMark ?? 0) < 1000) return;
-    if (Math.hypot(command.point[0] - p.x, command.point[2] - p.z) > 180)
+    if (
+      Math.hypot(command.point[0] - p.x, command.point[2] - p.z) >
+      180 * ARENA_SCALE
+    )
       return;
     p.lastMark = now;
     room.marks = (room.marks ?? []).filter(

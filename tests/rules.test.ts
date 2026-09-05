@@ -1,3 +1,4 @@
+import { INITIAL_CIRCLE } from '../lib/game/arena.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -10,10 +11,10 @@ import {
 } from '../lib/game/rules.ts';
 
 void test('storm gives players a grace period then closes in phases to the final circle', () => {
-  assert.equal(stormRadius(0), 107);
-  assert.equal(stormRadius(18), 107);
+  assert.equal(stormRadius(0), INITIAL_CIRCLE);
+  assert.equal(stormRadius(54), INITIAL_CIRCLE);
   assert.ok(stormRadius(100) < stormRadius(50));
-  assert.equal(stormRadius(270), 5);
+  assert.equal(stormRadius(335), 5);
   assert.equal(stormRadius(900), 5);
 });
 void test('weapon wheel wraps and skips weapons not collected', () => {

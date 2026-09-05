@@ -59,7 +59,7 @@ export function cycleWeapon(
     (index + (direction > 0 ? 1 : -1) + available.length) % available.length
   ];
 }
-export const MATCH_LENGTH = 152;
+export const MATCH_LENGTH = 335;
 export const BOT_COUNT = 15;
 export function stormRadius(elapsed: number) {
   return zoneAt(elapsed).radius;
