@@ -52,7 +52,7 @@ void test('zone holds, closes continuously, and announces the exact next destina
     assert.equal(end.x, hold.next.x);
     assert.equal(end.z, hold.next.z);
   }
-  assert.equal(at, 270);
+  assert.equal(at, 152);
   assert.equal(zoneAt(900).stage, 'final');
   assert.equal(zoneAt(900).radius, 5);
 });
@@ -73,4 +73,12 @@ void test('multiplayer damage and snapshots use the same moving center', () => {
   assert.equal(safe.health, 100);
   assert.ok(exposed.health < 100);
   assert.deepEqual(snapshot(room, now).zone, zone);
+});
+
+void test('small rooms start tighter and reach meaningful circles earlier without jumping when players die', () => {
+  assert.equal(zoneAt(0, 'small', 2).radius, 78);
+  assert.equal(zoneAt(0, 'large', 16).radius, 107);
+  assert.equal(zoneAt(32, 'small', 2).radius, 48);
+  assert.ok(zoneAt(60, 'small', 2).radius <= 30);
+  assert.equal(zoneAt(122, 'small', 2).stage, 'final');
 });

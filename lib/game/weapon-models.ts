@@ -1,17 +1,21 @@
 import * as THREE from 'three';
-import { WEAPONS } from './rules.ts';
+import { WEAPONS, RARITIES } from './rules.ts';
 import { modelKit } from './model-kit.ts';
 
 // One vertex-colored mesh per weapon. Extra first-person details never multiply
 // across the island's pickups or remote players. Forward is negative Z.
-function buildWeaponModel(index: number, detail: 'world' | 'held' = 'world') {
+function buildWeaponModel(
+  index: number,
+  detail: 'world' | 'held' = 'world',
+  rarity = 0,
+) {
   const k = modelKit(WEAPONS[index].short),
     { box, tube } = k;
   const dark = '#263239',
     edge = '#50636b',
     black = '#142026',
     pale = '#e6e1cb';
-  const accent = WEAPONS[index].color;
+  const accent = RARITIES[rarity].color;
   if (index === 0) {
     box(0.18, 0.19, 0.5, dark, 0, 0, 0.02, 0.035);
     box(0.185, 0.105, 0.32, accent, 0, 0.08, -0.22, 0.025);
@@ -80,15 +84,20 @@ function buildWeaponModel(index: number, detail: 'world' | 'held' = 'world') {
   }
   const root = k.finish();
   root.userData.detail = detail;
+  root.userData.rarity = rarity;
   return root;
 }
 
 const templates = new Map<string | number, THREE.Group>();
-export function weaponModel(index: number, detail: 'world' | 'held' = 'world') {
-  const key = `${index}:${detail}`;
+export function weaponModel(
+  index: number,
+  detail: 'world' | 'held' = 'world',
+  rarity = 0,
+) {
+  const key = `${index}:${detail}:${rarity}`;
   let template = templates.get(key);
   if (!template) {
-    template = buildWeaponModel(index, detail);
+    template = buildWeaponModel(index, detail, rarity);
     templates.set(key, template);
   }
   const model = template.clone(true);

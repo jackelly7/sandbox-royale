@@ -1,3 +1,4 @@
+import { floorAvailable } from '../lib/game/loot.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -105,7 +106,7 @@ void test('instanced pickups disappear completely and reset across rematches', (
     1,
   );
   assert.equal(game.loot.length, 63);
-  assert.ok(game.loot.every((l) => !l.used));
+  assert.ok(game.loot.every((l, i) => l.used === !floorAvailable(i)));
   game.disposeObject(game.world);
 });
 void test('character skins are stable, keep hit targets, and animate from limb pivots', () => {

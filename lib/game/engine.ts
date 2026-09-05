@@ -1,3 +1,21 @@
+import {
+  floorAvailable,
+  floorRarity,
+  lootColor,
+  collectGun,
+  eliminationDrops,
+  type WorldDrop,
+} from './loot.ts';
+import {
+  MOVE,
+  smoothVelocity,
+  blocksBody,
+  groundAt,
+  mantleTarget,
+  mantlePoint,
+  type Point,
+  type Bounds,
+} from './movement.ts';
 import { zoneAt, outsideZone, type Zone } from './zones.ts';
 import * as THREE from 'three';
 import { footstepDirection } from './sound-cues.ts';
@@ -18,6 +36,7 @@ import {
   BOT_COUNT,
   WEAPONS,
   HEADSHOT_MULTIPLIER,
+  RARITIES,
   shotDirection,
   weaponDamage,
   takeDamage,
@@ -51,6 +70,10 @@ export type GameState = RecoveryState & {
   reserve: number;
   weapon: number;
   owned: boolean[];
+  tiers?: number[];
+  crouching?: boolean;
+  sprinting?: boolean;
+  mantling?: boolean;
   elapsed: number;
   storm: number;
   zone?: Zone;
@@ -108,11 +131,20 @@ type Bot = {
   name: string;
   tag?: THREE.Sprite;
   armed: boolean;
+  rarity?: number;
+  ammunition?: number;
   dropping: boolean;
   dying: number;
   deathY: number;
 };
-type Loot = { mesh: THREE.Group; kind: number; used: boolean };
+type Loot = {
+  mesh: THREE.Group;
+  kind: number;
+  used: boolean;
+  rarity: number;
+  ammo?: number;
+  amount?: number;
+};
 export const landmarks = [
   { x: 18, z: -23, w: 14, d: 12, name: 'SANDCASTLE SQUARE' },
   { x: -22, z: -16, w: 14, d: 12, name: 'BUCKET TOWN' },
@@ -244,6 +276,12 @@ export class BattleGame {
   noticeTimer = 0;
   recoil = 0;
   zoneSeed = 'sandbox';
+  motion = new THREE.Vector2();
+  crouchOffset = 0;
+  crouchToggle = false;
+  touchSprint = false;
+  mantle?: { from: Point; to: Point; at: number };
+  physicsCache?: Bounds[];
   audio: AudioContext | null = null;
   observer: ResizeObserver;
   cleanup: (() => void)[] = [];
@@ -785,47 +823,73 @@ export class BattleGame {
     points.push([4, 12], [-5, -12], [15, 4], [-15, 4]);
     points.forEach(([x, z], i) => {
       const kind = i < 19 ? i % 5 : i < 43 ? (i - 19) % 3 : 3 + ((i - 43) % 2);
-      const colors = ['#85e2bc', '#ffc06a', '#cf9cf4', '#78dfee', '#ff7474'];
-      const group = new THREE.Group();
-      if (kind < 3) {
-        const model = weaponModel(kind);
-        model.scale.setScalar(1.7);
-        model.rotation.z = -0.15;
-        model.position.y = 0.95;
-        group.add(model);
-      } else {
-        const item = supplyModel(kind);
-        item.position.y = 0.85;
-        group.add(item);
-      }
-      const ring = new THREE.Mesh(
-        new THREE.RingGeometry(0.7, 0.92, 6),
-        new THREE.MeshBasicMaterial({
-          color: colors[kind],
-          transparent: true,
-          opacity: 0.35,
-        }),
-      );
-      ring.rotation.x = -Math.PI / 2;
-      ring.position.y = 0.07;
-      group.add(ring);
-      const beam = new THREE.Mesh(
-        new THREE.CylinderGeometry(0.11, 0.5, 5, 4, 1, true),
-        new THREE.MeshBasicMaterial({
-          color: colors[kind],
-          transparent: true,
-          opacity: 0.15,
-          depthWrite: false,
-        }),
-      );
-      beam.position.y = 2.5;
-      group.add(beam);
-      group.position.copy(this.safePosition(x, z));
-      this.world.add(group);
-      this.loot.push({ mesh: group, kind, used: false });
+      this.addLoot({
+        x,
+        z,
+        kind,
+        rarity: floorRarity(i),
+        used: !floorAvailable(i),
+      });
     });
-    this.lootInstances = new LootInstances(this.loot);
+    this.rebuildLoot();
+  }
+  addLoot(drop: WorldDrop) {
+    const { kind, rarity } = drop;
+    const color = lootColor(kind, rarity);
+    const group = new THREE.Group();
+    if (kind < 3) {
+      const model = weaponModel(kind, 'world', rarity);
+      model.scale.setScalar(1.7);
+      model.rotation.z = -0.15;
+      model.position.y = 0.95;
+      group.add(model);
+    } else {
+      const item = supplyModel(kind);
+      item.position.y = 0.85;
+      group.add(item);
+    }
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.7, 0.92, 6),
+      new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.35,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.07;
+    group.add(ring);
+    const beam = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.11, 0.5, 5, 4, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: color,
+        transparent: true,
+        opacity: 0.15,
+        depthWrite: false,
+      }),
+    );
+    beam.position.y = 2.5;
+    group.add(beam);
+    group.position.copy(this.safePosition(drop.x, drop.z));
+    group.visible = !drop.used;
+    this.world.add(group);
+    this.loot.push({
+      mesh: group,
+      kind,
+      rarity,
+      ammo: drop.ammo,
+      amount: drop.amount,
+      used: drop.used,
+    });
+  }
+  rebuildLoot() {
+    if (this.lootInstances) {
+      this.lootInstances.root.removeFromParent();
+      this.disposeObject(this.lootInstances.root);
+    }
+    this.lootInstances = new LootInstances(this.loot.filter((l) => !l.used));
     this.world.add(this.lootInstances.root);
+    this.lootInstances.update(this.time ?? 0);
   }
   buildGun() {
     this.camera.add(this.gun);
@@ -854,6 +918,14 @@ export class BattleGame {
       !(this.aiming && index === 2) &&
       !this.isDowned();
     this.gunModels?.forEach((model, i) => {
+      const tier = this.state.tiers?.[i] ?? 0;
+      if (model.userData.rarity !== tier) {
+        model.removeFromParent();
+        this.disposeObject(model);
+        model = weaponModel(i, 'held', tier);
+        this.gunModels[i] = model;
+        this.gun.add(model);
+      }
       model.visible = i === index;
     });
     this.flash.position.set(
@@ -977,6 +1049,8 @@ export class BattleGame {
       if (
         [
           'Space',
+          'ControlLeft',
+          'ControlRight',
           'Tab',
           'ArrowUp',
           'ArrowDown',
@@ -997,13 +1071,9 @@ export class BattleGame {
       }
       if (['Digit1', 'Digit2', 'Digit3'].includes(e.code))
         this.selectWeapon(Number(e.code.slice(-1)) - 1);
-      if (
-        e.code === 'Space' &&
-        !this.isDowned() &&
-        !this.state.dropping &&
-        this.position.y <= 1.71
-      )
-        this.velocityY = 7;
+      if (!e.repeat && e.code === 'KeyC')
+        this.crouchToggle = !this.crouchToggle;
+      if (!e.repeat && e.code === 'Space') this.jump();
       if (e.code === 'Escape') this.pause();
     }) as EventListener);
     on(this.renderer.domElement, 'wheel', ((e: WheelEvent) => {
@@ -1243,6 +1313,13 @@ export class BattleGame {
         reloading: false,
         aiming: false,
       };
+      this.state.tiers = [0, 0, 0];
+      this.state.crouching = false;
+      this.state.sprinting = false;
+      this.mantle = undefined;
+      this.crouchToggle = false;
+      this.crouchOffset = 0;
+      this.motion?.set(0, 0);
       this.position.set(0, DROP_HEIGHT, 50);
       this.yaw = 0;
       this.pitch = -0.6;
@@ -1350,13 +1427,21 @@ export class BattleGame {
       return;
     }
     if (l.kind < 3) {
-      const first = !this.state.owned[l.kind];
-      this.state.owned[l.kind] = true;
-      if (first) this.weaponAmmo[l.kind] = WEAPONS[l.kind].capacity;
-      this.reserveAmmo[l.kind] += WEAPONS[l.kind].capacity * 2;
-      if (first) this.selectWeapon(l.kind);
+      const inv = {
+        owned: this.state.owned,
+        tiers: this.state.tiers,
+        ammo: this.weaponAmmo,
+        reserve: this.reserveAmmo,
+        weapon: this.state.weapon,
+        medkits: this.state.medkits,
+        cells: this.state.cells,
+      };
+      const { first, upgrade } = collectGun(inv, l);
+      this.state.tiers = inv.tiers;
+      if (first || upgrade) this.selectWeapon(l.kind);
+      this.showWeapon();
       this.notice(
-        `${WEAPONS[l.kind].name} ${first ? 'collected' : 'ammo collected'}`,
+        `${RARITIES[l.rarity].name} ${WEAPONS[l.kind].name} · ${upgrade ? 'upgraded' : first ? 'collected' : 'ammo collected'}`,
       );
     }
     if (l.kind >= 3) {
@@ -1366,13 +1451,18 @@ export class BattleGame {
         this.notice(`${supply.name} inventory full`);
         return;
       }
-      this.state[supply.slot]++;
+      const collected = Math.min(
+        SUPPLY_LIMIT - this.state[supply.slot],
+        l.amount ?? 1,
+      );
+      this.state[supply.slot] += collected;
+      l.amount = (l.amount ?? 1) - collected;
       this.notice(
         `${supply.name} stored. Press ${item === 'medkit' ? 'Q' : 'F'} to use.`,
       );
     }
-    l.used = true;
-    l.mesh.visible = false;
+    l.used = l.kind < 3 || (l.amount ?? 0) <= 0;
+    l.mesh.visible = !l.used;
     this.sound(620, 0.16, 0.07, 'sine');
     this.emit();
   }
@@ -1520,6 +1610,7 @@ export class BattleGame {
   shoot() {
     if (
       this.state.dropping ||
+      this.mantle ||
       this.state.phase !== 'playing' ||
       this.isDowned()
     )
@@ -1572,8 +1663,11 @@ export class BattleGame {
           const result = takeDamage(
             b.hp,
             b.shield,
-            weaponDamage(this.state.weapon, first.distance) *
-              (headshot ? HEADSHOT_MULTIPLIER : 1),
+            weaponDamage(
+              this.state.weapon,
+              first.distance,
+              this.state.tiers?.[this.state.weapon] ?? 0,
+            ) * (headshot ? HEADSHOT_MULTIPLIER : 1),
           );
           b.hp = result.health;
           b.shield = result.shield;
@@ -1619,6 +1713,27 @@ export class BattleGame {
     if (b.tag) b.tag.visible = false;
   }
   killBot(b: Bot, player = false, killer = 'The sandbox') {
+    if (!b.dying && !this.network && (b.armed || b.ammunition !== undefined)) {
+      const kind = b.mesh.getObjectByName('Bot weapon')?.userData.weapon ?? 0;
+      const inv = {
+        owned: [0, 1, 2].map((i) => i === kind),
+        tiers: [0, 1, 2].map(() => b.rarity ?? 0),
+        ammo: [0, 1, 2].map((i) =>
+          i === kind ? (b.ammunition ?? WEAPONS[kind].capacity) : 0,
+        ),
+        reserve: [0, 0, 0],
+        weapon: kind,
+        medkits: 0,
+        cells: 0,
+      };
+      for (const drop of eliminationDrops(
+        inv,
+        b.mesh.position.x,
+        b.mesh.position.z,
+      ))
+        this.addLoot(drop);
+      this.rebuildLoot();
+    }
     this.beginBotDeath(b);
     b.hp = 0;
     if (player) {
@@ -1660,6 +1775,15 @@ export class BattleGame {
   }
   finish(won: boolean) {
     if (!this.network) this.state.rank = won ? 1 : this.state.alive;
+    if (!won && !this.network) {
+      for (const drop of eliminationDrops(
+        { ...this.state, ammo: this.weaponAmmo, reserve: this.reserveAmmo },
+        this.position.x,
+        this.position.z,
+      ))
+        this.addLoot(drop);
+      this.rebuildLoot();
+    }
     this.state.survived = this.state.elapsed;
     this.state.phase = won ? 'won' : 'dying';
     this.state.deathRemaining = won ? 0 : 1.4;
@@ -1695,9 +1819,58 @@ export class BattleGame {
         z < b.max.z + 0.48,
     );
   }
-  move(pos: THREE.Vector3, dx: number, dz: number) {
-    if (pos.y > 3.1 || !this.blocked(pos.x + dx, pos.z)) pos.x += dx;
-    if (pos.y > 3.1 || !this.blocked(pos.x, pos.z + dz)) pos.z += dz;
+  physicsBounds() {
+    if (
+      !this.physicsCache ||
+      this.physicsCache.length !== this.colliders.length
+    )
+      this.physicsCache = this.colliders.map((b) => ({
+        min: b.min.toArray(),
+        max: b.max.toArray(),
+      }));
+    return this.physicsCache;
+  }
+  jump() {
+    if (
+      this.state.phase !== 'playing' ||
+      this.state.dropping ||
+      this.isDowned() ||
+      this.mantle
+    )
+      return;
+    const floor =
+      groundAt(
+        this.position.x,
+        this.position.z,
+        this.position.y - 1.7,
+        this.physicsBounds(),
+      ) + 1.7;
+    if (Math.abs(this.position.y - floor) > 0.15) return;
+    const to = mantleTarget(this.position, this.yaw, this.physicsBounds());
+    if (to) {
+      this.network?.send({ type: 'mantle', pose: this.pose() });
+      this.mantle = {
+        from: { x: this.position.x, y: this.position.y, z: this.position.z },
+        to,
+        at: this.time,
+      };
+      this.crouchToggle = false;
+      this.velocityY = 0;
+      this.motion?.set(0, 0);
+    } else this.velocityY = MOVE.jump;
+  }
+  move(pos: THREE.Vector3, dx: number, dz: number, feet = 0) {
+    const airborneDrop = pos === this.position && this.state.dropping;
+    if (
+      airborneDrop ||
+      !blocksBody(pos.x + dx, pos.z, feet, this.physicsBounds())
+    )
+      pos.x += dx;
+    if (
+      airborneDrop ||
+      !blocksBody(pos.x, pos.z + dz, feet, this.physicsBounds())
+    )
+      pos.z += dz;
     const length = Math.hypot(pos.x, pos.z);
     if (length > 110) {
       pos.x *= 110 / length;
@@ -1754,6 +1927,8 @@ export class BattleGame {
         if (supply) {
           if (supply.mesh.position.distanceTo(p) < 2.8) {
             b.armed = true;
+            b.rarity = supply.rarity;
+            b.ammunition = supply.ammo ?? WEAPONS[supply.kind].capacity * 3;
             supply.used = true;
             supply.mesh.visible = false;
             const oldGun = b.mesh.getObjectByName('Bot weapon');
@@ -1761,7 +1936,7 @@ export class BattleGame {
               oldGun.removeFromParent();
               this.disposeObject(oldGun);
             }
-            const held = weaponModel(supply.kind);
+            const held = weaponModel(supply.kind, 'world', supply.rarity);
             held.name = 'Bot weapon';
             held.userData.weapon = supply.kind;
             held.traverse((o) => {
@@ -1829,12 +2004,15 @@ export class BattleGame {
       ) {
         const from = p.clone().add(new THREE.Vector3(0, 1.45, 0));
         if (this.visible(from, target)) {
+          b.ammunition = Math.max(0, (b.ammunition ?? 90) - 1);
+          if (b.ammunition === 0) b.armed = false;
           this.tracer(from, target, '#ff9c73');
           if (b.target === -1) this.incomingFire(from);
           if (Math.random() < (distance < 18 ? 0.68 : 0.38)) {
             const amount =
               (5 + Math.random() * 4) *
-              (weaponDamage(weapon, distance) / WEAPONS[weapon].damage);
+              (weaponDamage(weapon, distance, b.rarity ?? 0) /
+                WEAPONS[weapon].damage);
             if (b.target === -1) this.damage(amount, from, b.name);
             else if (opponent) {
               const hit = takeDamage(opponent.hp, opponent.shield, amount);
@@ -1995,23 +2173,51 @@ export class BattleGame {
         mx /= length;
         mz /= length;
       }
+      this.state.crouching =
+        !this.state.dropping &&
+        !this.isDowned() &&
+        !this.mantle &&
+        (this.crouchToggle ||
+          this.keys.has('ControlLeft') ||
+          this.keys.has('ControlRight'));
+      this.state.sprinting =
+        !this.state.crouching &&
+        !this.aiming &&
+        !this.state.healing &&
+        length > 0.1 &&
+        (this.keys.has('ShiftLeft') ||
+          this.keys.has('ShiftRight') ||
+          this.touchSprint);
       const speed =
-        (this.network && this.networkRoom?.phase !== 'playing'
+        this.network && this.networkRoom?.phase !== 'playing'
           ? 0
           : this.state.dropping
-            ? 9
+            ? 10
             : this.isDowned()
               ? 2
-              : this.keys.has('ShiftLeft')
-                ? 11
-                : 7) *
-        (this.state.healing ? 0.5 : this.aiming ? 0.6 : 1) *
-        dt;
-      this.move(
-        this.position,
-        (mx * Math.cos(this.yaw) - mz * Math.sin(this.yaw)) * speed,
-        (-mx * Math.sin(this.yaw) - mz * Math.cos(this.yaw)) * speed,
+              : this.state.crouching
+                ? MOVE.crouch
+                : this.state.sprinting
+                  ? MOVE.sprint
+                  : MOVE.run;
+      const pace = this.state.healing ? 0.7 : this.aiming ? 0.7 : 1;
+      this.motion.x = smoothVelocity(
+        this.motion.x,
+        (mx * Math.cos(this.yaw) - mz * Math.sin(this.yaw)) * speed * pace,
+        dt,
       );
+      this.motion.y = smoothVelocity(
+        this.motion.y,
+        (-mx * Math.sin(this.yaw) - mz * Math.cos(this.yaw)) * speed * pace,
+        dt,
+      );
+      if (!this.mantle)
+        this.move(
+          this.position,
+          this.motion.x * dt,
+          this.motion.y * dt,
+          this.position.y - 1.7,
+        );
       if (this.keys.has('ArrowLeft')) this.yaw += dt * 1.5;
       if (this.keys.has('ArrowRight')) this.yaw -= dt * 1.5;
       if (this.network && this.networkRoom?.phase === 'countdown')
@@ -2029,32 +2235,62 @@ export class BattleGame {
           this.notice('Feet in the sand. Find a weapon and press E.');
           this.sound(110, 0.18, 0.035, 'triangle');
         }
+      } else if (this.mantle) {
+        const progress = (this.time - this.mantle.at) / MOVE.mantleSeconds;
+        const point = mantlePoint(this.mantle.from, this.mantle.to, progress);
+        this.position.set(point.x, point.y, point.z);
+        this.velocityY = 0;
+        if (progress >= 1) this.mantle = undefined;
       } else {
-        this.velocityY -= 20 * dt;
-        this.position.y = Math.max(1.7, this.position.y + this.velocityY * dt);
+        const floor =
+          groundAt(
+            this.position.x,
+            this.position.z,
+            this.position.y - 1.7,
+            this.physicsBounds(),
+          ) + 1.7;
+        this.velocityY -= 22 * dt;
+        this.position.y = Math.max(
+          floor,
+          this.position.y + this.velocityY * dt,
+        );
+        if (this.position.y <= floor) this.velocityY = 0;
       }
+      this.state.mantling = !!this.mantle;
       this.state.altitude = Math.max(0, this.position.y - 1.7);
       if (this.position.y === 1.7) this.velocityY = 0;
-      if (this.correction.lengthSq() > 0.000001) {
+      if (!this.mantle && this.correction.lengthSq() > 0.000001) {
         const step = this.correction
           .clone()
           .multiplyScalar(1 - Math.exp(-dt * 12));
         this.position.add(step);
         this.correction.sub(step);
       }
+      this.crouchOffset +=
+        ((this.state.crouching ? 0.65 : 0) - this.crouchOffset) *
+        (1 - Math.exp(-dt * 18));
       this.camera.position.copy(this.position);
+      this.camera.position.y -= this.crouchOffset;
       if (this.isDowned()) this.camera.position.y -= 0.95;
       this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
       this.camera.fov = THREE.MathUtils.lerp(
         this.camera.fov,
-        this.aiming ? (this.state.weapon === 2 ? 28 : 45) : 72,
+        this.aiming
+          ? this.state.weapon === 2
+            ? 28
+            : 45
+          : this.state.sprinting
+            ? 78
+            : 72,
         dt * 12,
       );
       this.camera.updateProjectionMatrix();
       this.gun.position.set(
         this.aiming ? 0.18 : 0.28,
         (this.aiming ? -0.33 : -0.28) +
-          Math.sin(this.time * 10) * Math.min(length, 1) * 0.012,
+          Math.sin(this.time * (this.state.sprinting ? 13 : 10)) *
+            Math.min(this.motion.length() / MOVE.run, 1) *
+            0.009,
         -0.5 + this.recoil,
       );
       this.gun.rotation.set(
@@ -2082,7 +2318,7 @@ export class BattleGame {
       const near = this.state.dropping ? undefined : this.nearestLoot();
       this.state.pickup = near
         ? near.kind < 3
-          ? `${WEAPONS[near.kind].name}${this.state.owned[near.kind] ? ' ammo' : ''}`
+          ? `${RARITIES[near.rarity].name} ${WEAPONS[near.kind].name}${!this.state.owned[near.kind] ? '' : near.rarity > (this.state.tiers?.[near.kind] ?? 0) ? ' · UPGRADE' : ' · AMMO'}`
           : near.kind === 3
             ? 'Shield cell · F to use'
             : 'Medkit · Q to use'
@@ -2293,6 +2529,8 @@ export class BattleGame {
       yaw: this.yaw,
       pitch: this.pitch,
       weapon: this.state.weapon,
+      crouching: this.state.crouching,
+      sprinting: this.state.sprinting,
     };
   }
   attachNetwork(playerId: string, send: (command: Command) => void) {
@@ -2341,6 +2579,7 @@ export class BattleGame {
       this.state.shieldBreak = 0;
       this.state.weapon = -1;
       this.state.owned = [...me.owned];
+      this.state.tiers = [...(me.tiers ?? [0, 0, 0])];
       this.correction.set(0, 0, 0);
       this.state.hit = 0;
       this.state.hurt = 0;
@@ -2378,7 +2617,7 @@ export class BattleGame {
         Math.hypot(p.x - previous.x, p.z - previous.z) > 0.025
       )
         this.hearStep(p.id, p.x, p.z);
-      b.mesh.scale.y = p.downed ? 0.38 : 1;
+      b.mesh.scale.y = p.downed ? 0.38 : p.crouching ? 0.66 : 1;
       if (b.name !== label) {
         if (b.tag) {
           b.mesh.remove(b.tag);
@@ -2391,12 +2630,16 @@ export class BattleGame {
         if (b.tag) b.tag.material.color.set(teammate ? '#7effd1' : '#ffffff');
       }
       let held = b.mesh.getObjectByName('Bot weapon');
-      if (p.weapon >= 0 && held?.userData.weapon !== p.weapon) {
+      if (
+        p.weapon >= 0 &&
+        (held?.userData.weapon !== p.weapon ||
+          held?.userData.rarity !== (p.tiers?.[p.weapon] ?? 0))
+      ) {
         if (held) {
           held.removeFromParent();
           this.disposeObject(held);
         }
-        held = weaponModel(p.weapon);
+        held = weaponModel(p.weapon, 'world', p.tiers?.[p.weapon] ?? 0);
         held.name = 'Bot weapon';
         held.userData.weapon = p.weapon;
         held.scale.setScalar(0.8);
@@ -2414,7 +2657,25 @@ export class BattleGame {
       b.mesh.rotation.y = p.yaw + Math.PI;
       return new THREE.Vector3(p.x, p.y - 1.7, p.z);
     });
-    if (!newRound && acknowledgedPose) {
+    if (
+      me.mantleUntil &&
+      me.mantleUntil > room.now &&
+      me.mantleFrom &&
+      me.mantleTo
+    ) {
+      this.mantle = {
+        from: me.mantleFrom,
+        to: me.mantleTo,
+        at: this.time - (room.now - (me.mantleStarted ?? room.now)) / 1000,
+      };
+      this.correction.set(0, 0, 0);
+    }
+    if (newRound) {
+      this.mantle = undefined;
+      this.motion?.set(0, 0);
+      this.crouchToggle = false;
+    }
+    if (!newRound && acknowledgedPose && !this.mantle) {
       const correctionX = me.x - acknowledgedPose.x,
         correctionZ = me.z - acknowledgedPose.z;
       if (Math.hypot(correctionX, correctionZ) > 0.05) {
@@ -2461,9 +2722,12 @@ export class BattleGame {
     this.storm.position.set(this.state.zone.x, 24, this.state.zone.z);
     this.storm.scale.set(this.state.storm, 1, this.state.storm);
     const inventoryChanged = this.state.owned.some(
-      (has, i) => has !== me.owned[i],
+      (has, i) =>
+        has !== me.owned[i] ||
+        (this.state.tiers?.[i] ?? 0) !== (me.tiers?.[i] ?? 0),
     );
     this.state.owned = [...me.owned];
+    this.state.tiers = [...(me.tiers ?? [0, 0, 0])];
     if (inventoryChanged || newRound) this.state.weapon = me.weapon;
     this.showWeapon();
     if (me.health <= 0) this.gun.visible = false;
@@ -2476,6 +2740,17 @@ export class BattleGame {
         this.loot[i].mesh.visible = !used;
       }
     });
+    let added = false;
+    (room.drops ?? []).forEach((drop, i) => {
+      const index = room.loot.length + i;
+      if (!this.loot[index]) {
+        this.addLoot(drop);
+        added = true;
+      }
+      this.loot[index].used = drop.used;
+      this.loot[index].amount = drop.amount;
+    });
+    if (added) this.rebuildLoot();
     for (const e of room.events) {
       if (this.networkEvents.has(e.id)) continue;
       this.networkEvents.add(e.id);

@@ -442,3 +442,22 @@ void test('solo shotgun hits up close and cannot damage a distant rival', () => 
     game.disposeObject(game.scene);
   }
 });
+
+void test('solo elimination drops a bot weapon with its rarity even after damage sets health to zero', () => {
+  const game = arena();
+  game.buildWorld();
+  game.resetBots();
+  const b = game.bots[0];
+  b.armed = true;
+  b.rarity = 3;
+  b.ammunition = 17;
+  b.hp = 0;
+  const before = game.loot.length;
+  game.killBot(b, true);
+  assert.equal(game.loot.length, before + 1);
+  assert.equal(game.loot[before].rarity, 3);
+  assert.equal(game.loot[before].ammo, 17);
+  game.killBot(b);
+  assert.equal(game.loot.length, before + 1);
+  game.disposeObject(game.scene);
+});

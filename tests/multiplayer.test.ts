@@ -1,3 +1,5 @@
+import { floorAvailable } from '../lib/game/loot.ts';
+import { zoneAt } from '../lib/game/zones.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -190,6 +192,9 @@ void test('disconnect grace allows recovery and eventually resolves a match', ()
   applyCommand(room, p.id, { type: 'ping' }, at + 19000);
   applyCommand(room, q.id, { type: 'ping' }, at + 19000);
   assert.equal(room.phase, 'playing');
+  const safe = zoneAt(35, `${room.code}:${room.round}`, room.zonePlayers);
+  p.x = safe.x;
+  p.z = safe.z;
   applyCommand(room, p.id, { type: 'ping' }, at + 40000);
   assert.equal(room.winner, p.id);
   assert.equal(q.rank, 2);
@@ -211,7 +216,7 @@ void test('rematch requires the host and resets ammo, loot, and the round', () =
   addMember(room, createMember('next', 'Next', 'secret', at + 5200));
   applyCommand(room, 'host', { type: 'start' }, at + 5300);
   assert.equal(room.round, 2);
-  assert.ok(room.loot.every((used) => !used));
+  assert.ok(room.loot.every((used, i) => used === !floorAvailable(i)));
   assert.ok(
     room.players.every(
       (p) =>
@@ -227,7 +232,9 @@ void test('recovery drops are stored at full health, capped, and cannot be claim
   const room = started(),
     [p, q] = room.players;
   for (const kind of [3, 4]) {
-    const indices = MAP.loot.flatMap((l, i) => (l.kind === kind ? [i] : []));
+    const indices = MAP.loot.flatMap((l, i) =>
+      l.kind === kind && floorAvailable(i) ? [i] : [],
+    );
     const slot = kind === 3 ? 'cells' : 'medkits';
     for (const index of indices.slice(0, 4)) {
       Object.assign(p, MAP.loot[index]);
@@ -419,7 +426,7 @@ void test('the opening drop is server controlled, steerable, and ends outside bu
     'Landing over a roof resolves to clear ground nearby',
   );
   applyCommand(room, p.id, { type: 'pose', pose: { ...p, y: 42 } }, at + 12100);
-  assert.equal(p.y, 3.05, 'A landed player cannot start flying again');
+  assert.equal(p.y, 3.8, 'A landed player cannot start flying again');
 });
 void test('killer identity remains available after transient elimination events expire', () => {
   const room = started(),

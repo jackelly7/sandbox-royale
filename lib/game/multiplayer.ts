@@ -1,3 +1,5 @@
+import type { WorldDrop } from './loot.ts';
+import type { Point } from './movement.ts';
 import type { Zone } from './zones.ts';
 import type { RecoveryState, SupplyKind } from './rules.ts';
 export type PlayerPose = {
@@ -7,6 +9,8 @@ export type PlayerPose = {
   yaw: number;
   pitch: number;
   weapon: number;
+  crouching?: boolean;
+  sprinting?: boolean;
 };
 export type Player = PlayerPose &
   RecoveryState & {
@@ -28,6 +32,11 @@ export type Player = PlayerPose &
     reviving?: string | null;
     reviveUntil?: number;
     owned: boolean[];
+    tiers?: number[];
+    mantleFrom?: Point;
+    mantleTo?: Point;
+    mantleStarted?: number;
+    mantleUntil?: number;
     ammo: number[];
     reserve: number[];
     reloadUntil: number;
@@ -45,6 +54,7 @@ export type RoomSnapshot = {
   winner: string | null;
   players: Player[];
   loot: boolean[];
+  drops?: WorldDrop[];
   events: GameEvent[];
   mode?: 'solo' | 'duos';
   winningTeam?: number | null;
@@ -74,6 +84,7 @@ export type GameEvent = {
 export type Command =
   | { type: 'pose'; pose: PlayerPose }
   | { type: 'shoot'; pose: PlayerPose; aiming: boolean }
+  | { type: 'mantle'; pose: PlayerPose }
   | { type: 'reload' }
   | { type: 'heal'; item: SupplyKind }
   | { type: 'cancelHeal' }

@@ -1,4 +1,10 @@
 import { zoneAt } from './zones.ts';
+export const RARITIES = [
+  { name: 'Common', color: '#c9d0d5', power: 1 },
+  { name: 'Rare', color: '#59adff', power: 1.1 },
+  { name: 'Epic', color: '#bb85ff', power: 1.2 },
+  { name: 'Legendary', color: '#ffc34d', power: 1.3 },
+];
 export const WEAPONS = [
   {
     name: 'Ranger AR',
@@ -53,7 +59,7 @@ export function cycleWeapon(
     (index + (direction > 0 ? 1 : -1) + available.length) % available.length
   ];
 }
-export const MATCH_LENGTH = 270;
+export const MATCH_LENGTH = 152;
 export const BOT_COUNT = 15;
 export function stormRadius(elapsed: number) {
   return zoneAt(elapsed).radius;
@@ -158,10 +164,10 @@ export function shotDirection(
   const p = pitch + Math.sin(angle) * radius;
   return [-Math.sin(y) * Math.cos(p), Math.sin(p), -Math.cos(y) * Math.cos(p)];
 }
-export function weaponDamage(weapon: number, distance: number) {
+export function weaponDamage(weapon: number, distance: number, rarity = 0) {
   const w = WEAPONS[weapon];
   if (distance >= w.range) return 0;
   const falloff =
     weapon === 1 ? Math.max(0, 1 - Math.max(0, distance - 10) / 18) : 1;
-  return w.damage * falloff;
+  return w.damage * falloff * (RARITIES[rarity]?.power ?? 1);
 }

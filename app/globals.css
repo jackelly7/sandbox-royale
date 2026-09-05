@@ -3348,3 +3348,34 @@ kbd {
   border: 1px dashed white;
   background: transparent;
 }
+
+.movement-status {
+  position: absolute;
+  left: 50%;
+  bottom: 135px;
+  transform: translateX(-50%);
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #fff;
+  text-shadow: 0 1px 3px #000;
+  pointer-events: none;
+}
+.touch-movement {
+  position: absolute;
+  right: 20px;
+  bottom: 245px;
+  display: flex;
+  gap: 8px;
+}
+.touch-movement button {
+  padding: 10px;
+  border: 1px solid #fff8;
+  border-radius: 8px;
+  background: #17232bdd;
+  color: white;
+  font-size: 12px;
+  pointer-events: auto;
+}
+.weapon-slot small {
+  color: var(--weapon-color);
+}

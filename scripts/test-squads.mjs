@@ -59,23 +59,31 @@ async function connect(session) {
 }
 const mine = (c) => c.room.players.find((p) => p.id === c.session.playerId);
 async function walk(c, x, z) {
-  const pose = { ...mine(c) };
+  const pose = { ...mine(c), sprinting: true };
   for (let step = 0; step < 250; step++) {
     const dx = x - pose.x,
       dz = z - pose.z,
       length = Math.hypot(dx, dz);
     if (length < 0.03) break;
-    const amount = Math.min(0.8, length);
+    const amount = Math.min(1.3, length);
     pose.x += (dx / length) * amount;
     pose.z += (dz / length) * amount;
     c.send({ type: 'pose', pose });
     await wait(100);
   }
-  await c.until((r) =>
-    r.players.some(
-      (p) => p.id === c.session.playerId && Math.hypot(p.x - x, p.z - z) < 0.2,
-    ),
-  );
+  try {
+    await c.until((r) =>
+      r.players.some(
+        (p) =>
+          p.id === c.session.playerId && Math.hypot(p.x - x, p.z - z) < 0.2,
+      ),
+    );
+  } catch {
+    const p = mine(c);
+    throw new Error(
+      `Walk to ${x},${z} stopped at ${p.x},${p.z}; health ${p.health}; phase ${c.room.phase}`,
+    );
+  }
 }
 let code;
 try {
@@ -120,25 +128,52 @@ try {
   await walk(host, 5, 62);
   host.send({ type: 'pickup', index: 19 });
   await host.until(() => mine(host).owned[0]);
-  await Promise.all(
-    [b, d].map(async (player) => {
+  await Promise.all([
+    (async () => {
+      await walk(host, 6, 40);
+      await walk(c, 0, 50);
+      c.send({ type: 'mantle', pose: { ...mine(c), yaw: 0 } });
+      await c.until(() => (mine(c).mantleUntil ?? 0) > 0);
+      await c.until(() => mine(c).mantleUntil === 0);
+      assert.ok(mine(c).y > 4, 'Mantle reaches the cover top');
+      c.send({
+        type: 'pose',
+        pose: { ...mine(c), crouching: true, sprinting: false },
+      });
+      await c.until(() => mine(c).crouching === true);
+      console.log('PASS sprint movement, server mantle, and crouching');
+    })(),
+    ...[b, d].map(async (player) => {
       for (const [x, z] of [
         [12, -67],
         [12, -44],
         [12, -35],
         [6, -35],
-        [6, 58],
-        [player === b ? 17 : 15, 58],
-      ])
+        [7, -6],
+        [6, 40],
+        [player === b ? 16 : 14, player === b ? 40 : 42],
+      ]) {
         await walk(player, x, z);
+        if (player === b && z === -6) {
+          b.send({ type: 'pickup', index: 2 });
+          await b.until(() => mine(b).owned[2]);
+        }
+      }
     }),
-  );
+  ]);
   const fire = (target) => {
     const p = mine(host),
       t = mine(target);
     host.send({
       type: 'shoot',
-      pose: { ...p, yaw: Math.atan2(-(t.x - p.x), -(t.z - p.z)), pitch: 0 },
+      pose: {
+        ...p,
+        yaw: Math.atan2(-(t.x - p.x), -(t.z - p.z)),
+        pitch: Math.atan2(
+          t.y - 1.7 + (t.downed ? 0.45 : 1.3) - p.y,
+          Math.hypot(t.x - p.x, t.z - p.z),
+        ),
+      },
       aiming: true,
     });
   };
@@ -154,6 +189,26 @@ try {
   await b.until(() => !mine(b).downed && mine(b).health === 50);
   console.log(
     'PASS real weapon downs enemy, teammate channels revive, shared health restores',
+  );
+  for (let n = 0; n < 18 && mine(b).health > 0; n++) {
+    fire(b);
+    await wait(170);
+  }
+  await b.until(() => mine(b).health === 0);
+  await host.until((r) =>
+    r.drops?.some((drop) => drop.kind === 2 && !drop.used),
+  );
+  const dropIndex = host.room.drops.findIndex(
+    (drop) => drop.kind === 2 && !drop.used,
+  );
+  assert.ok(dropIndex >= 0, 'Eliminated player drops their sniper');
+  const dropped = host.room.drops[dropIndex];
+  await walk(host, 16, 40);
+  host.send({ type: 'pickup', index: host.room.loot.length + dropIndex });
+  await host.until(() => mine(host).owned[2]);
+  assert.equal(mine(host).tiers[2], dropped.rarity);
+  console.log(
+    'PASS real elimination drops transferable weapon rarity and ammo',
   );
   const late = await connect(
     await post(`/rooms/${code}/join`, { name: 'Late Visitor' }),

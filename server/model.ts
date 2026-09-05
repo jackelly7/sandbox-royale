@@ -1,3 +1,17 @@
+import {
+  floorAvailable,
+  floorRarity,
+  collectGun,
+  eliminationDrops,
+  type WorldDrop,
+} from '../lib/game/loot.ts';
+import {
+  MOVE,
+  blocksBody,
+  groundAt,
+  mantleTarget,
+  mantlePoint,
+} from '../lib/game/movement.ts';
 import { zoneAt, outsideZone } from '../lib/game/zones.ts';
 import { randomUUID } from 'node:crypto';
 import { MAP } from '../lib/game/map-data.ts';
@@ -44,6 +58,8 @@ export type Room = {
   winner: string | null;
   players: Member[];
   loot: boolean[];
+  drops?: WorldDrop[];
+  zonePlayers?: number;
   events: GameEvent[];
   marks?: GameEvent[];
 };
@@ -120,6 +136,13 @@ export function createMember(
     reviving: null,
     reviveUntil: 0,
     owned: [false, false, false],
+    tiers: [0, 0, 0],
+    crouching: false,
+    sprinting: false,
+    mantleFrom: undefined,
+    mantleTo: undefined,
+    mantleStarted: 0,
+    mantleUntil: 0,
     ammo: [0, 0, 0],
     reserve: [0, 0, 0],
     reloadUntil: 0,
@@ -142,7 +165,7 @@ export function createRoom(code: string, member: Member, now: number): Room {
     tickAt: now,
     winner: null,
     players: [member],
-    loot: MAP.loot.map(() => false),
+    loot: MAP.loot.map((_, i) => !floorAvailable(i)),
     events: [],
   };
 }
@@ -206,6 +229,7 @@ export function damageMember(
         teammates(room, target, q) && q.health > 0 && !q.downed && !q.spectator,
     )
   ) {
+    target.mantleUntil = 0;
     target.downed = true;
     target.health = 100;
     target.shield = 0;
@@ -227,6 +251,12 @@ function event(room: Room, data: Omit<GameEvent, 'id'>) {
 }
 function eliminate(room: Room, player: Member, now: number, killer?: Member) {
   if (player.rank || player.spectator) return;
+  room.drops ??= [];
+  for (const drop of eliminationDrops(player, player.x, player.z)) {
+    const landing = safeLanding(drop.x, drop.z);
+    room.drops.push({ ...drop, ...landing });
+  }
+  player.mantleUntil = 0;
   player.health = 0;
   player.downed = false;
   player.reviving = null;
@@ -280,7 +310,11 @@ export function advance(room: Room, now: number) {
   if (room.phase === 'countdown' && now >= room.startAt) room.phase = 'playing';
   if (room.phase !== 'playing') return;
   const elapsed = Math.max(0, (now - room.startAt) / 1000),
-    zone = zoneAt(elapsed, `${room.code}:${room.round}`);
+    zone = zoneAt(
+      elapsed,
+      `${room.code}:${room.round}`,
+      room.zonePlayers ?? 16,
+    );
   for (const p of room.players) {
     if (p.health <= 0) continue;
     if (p.downed && now >= (p.bleedOutAt ?? 0)) {
@@ -291,6 +325,20 @@ export function advance(room: Room, now: number) {
         room.players.find((q) => q.id === p.downedBy),
       );
       continue;
+    }
+    if (p.mantleUntil && p.mantleFrom && p.mantleTo) {
+      Object.assign(
+        p,
+        mantlePoint(
+          p.mantleFrom,
+          p.mantleTo,
+          (now - (p.mantleStarted ?? now)) / (MOVE.mantleSeconds * 1000),
+        ),
+      );
+      if (now >= p.mantleUntil) {
+        p.mantleUntil = 0;
+        p.credit = 0;
+      }
     }
     if (p.dropping) {
       p.y = Math.max(1.7, p.y - Math.min(dt, elapsed) * DROP_SPEED);
@@ -384,11 +432,28 @@ function validPose(p: unknown): p is PlayerPose {
 }
 function move(p: Member, pose: PlayerPose, now: number) {
   if (!validPose(pose)) throw new GameError('Invalid movement.');
+  p.crouching = pose.crouching === true && !p.dropping && !p.downed;
+  p.sprinting = pose.sprinting === true && !p.crouching;
+  if (p.mantleUntil && now < p.mantleUntil) {
+    p.yaw = pose.yaw;
+    p.pitch = pose.pitch;
+    return;
+  }
   const dt = Math.max(0, (now - p.moveAt) / 1000);
   p.moveAt = now;
   p.credit = Math.min(
     p.downed ? 0.5 : 8,
-    p.credit + dt * (p.downed ? 2 : 11.1),
+    p.credit +
+      dt *
+        (p.downed
+          ? 2
+          : p.dropping
+            ? 10
+            : p.crouching
+              ? MOVE.crouch + 0.2
+              : p.sprinting
+                ? MOVE.sprint + 0.3
+                : MOVE.run + 0.3),
   );
   const dx = pose.x - p.x,
     dz = pose.z - p.z,
@@ -397,7 +462,14 @@ function move(p: Member, pose: PlayerPose, now: number) {
     let clear = true;
     const steps = Math.max(1, Math.ceil(distance / 0.25));
     for (let i = 1; i <= steps && !p.dropping; i++)
-      if (blocked(p.x + (dx * i) / steps, p.z + (dz * i) / steps)) {
+      if (
+        blocksBody(
+          p.x + (dx * i) / steps,
+          p.z + (dz * i) / steps,
+          Math.min(p.y, pose.y) - 1.7,
+          MAP.colliders,
+        )
+      ) {
         clear = false;
         break;
       }
@@ -407,7 +479,15 @@ function move(p: Member, pose: PlayerPose, now: number) {
       p.credit -= distance;
     }
   }
-  if (!p.dropping) p.y = p.downed ? 1.7 : Math.max(1.7, Math.min(3.05, pose.y));
+  if (!p.dropping) {
+    const floor = groundAt(p.x, p.z, p.y - 1.7, MAP.colliders) + 1.7;
+    p.y = p.downed
+      ? floor
+      : Math.max(
+          floor,
+          Math.min(Math.max(p.y, floor + 2.1), p.y + dt * 9 + 0.05, pose.y),
+        );
+  }
   p.yaw = pose.yaw % (Math.PI * 2);
   p.pitch = Math.max(-1.35, Math.min(1.35, pose.pitch));
   if (p.weapon !== pose.weapon && pose.weapon >= 0 && p.owned[pose.weapon]) {
@@ -445,7 +525,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
     return;
   p.ammo[p.weapon]--;
   p.shotAt = now;
-  const origin = [p.x, p.y, p.z];
+  const origin = [p.x, p.y - (p.crouching ? 0.65 : 0), p.z];
   let end: [number, number, number] = [p.x, p.y, p.z];
   const hits = new Map<
     string,
@@ -472,7 +552,11 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
         origin,
         dir,
         [other.x - 0.47, base + 0.02, other.z - 0.32],
-        [other.x + 0.47, base + (other.downed ? 0.85 : 2.28), other.z + 0.32],
+        [
+          other.x + 0.47,
+          base + (other.downed ? 0.85 : other.crouching ? 1.5 : 2.28),
+          other.z + 0.32,
+        ],
       );
       if (t !== null && t < nearest) {
         nearest = t;
@@ -485,12 +569,14 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
       origin[2] + dir[2] * nearest,
     ];
     if (target) {
-      const headshot = end[1] - (target.y - 1.7) > 1.72;
+      const headshot =
+        end[1] - (target.y - 1.7) > (target.crouching ? 1.15 : 1.72);
       const oldHealth = target.health,
         oldShield = target.shield;
       const amount = Math.min(
         oldHealth + oldShield,
-        weaponDamage(p.weapon, nearest) * (headshot ? HEADSHOT_MULTIPLIER : 1),
+        weaponDamage(p.weapon, nearest, p.tiers?.[p.weapon] ?? 0) *
+          (headshot ? HEADSHOT_MULTIPLIER : 1),
       );
       damageMember(room, target, amount, now, p);
       const hit = hits.get(target.id) ?? {
@@ -576,7 +662,9 @@ export function applyCommand(
     room.tickAt = now;
     room.winner = null;
     room.winningTeam = null;
-    room.loot = MAP.loot.map(() => false);
+    room.loot = MAP.loot.map((_, i) => !floorAvailable(i));
+    room.drops = [];
+    room.zonePlayers = connected.length;
     room.events = [];
     room.marks = [];
     room.players.forEach((member, i) => {
@@ -642,6 +730,24 @@ export function applyCommand(
     return;
   }
   if (p.dropping && command.type !== 'pose') return;
+  if (command.type === 'mantle') {
+    if (p.mantleUntil && now < p.mantleUntil) return;
+    move(p, command.pose, now);
+    const floor = groundAt(p.x, p.z, p.y - 1.7, MAP.colliders) + 1.7;
+    const to =
+      Math.abs(p.y - floor) < 0.2
+        ? mantleTarget(p, p.yaw, MAP.colliders)
+        : null;
+    if (to) {
+      p.crouching = false;
+      p.mantleFrom = { x: p.x, y: p.y, z: p.z };
+      p.mantleTo = to;
+      p.mantleStarted = now;
+      p.mantleUntil = now + MOVE.mantleSeconds * 1000;
+    }
+    return;
+  }
+  if (p.mantleUntil && now < p.mantleUntil && command.type !== 'pose') return;
   if (command.type === 'revive') {
     const target = room.players.find((q) => q.id === command.target);
     if (!target || !canRevive(room, p, target))
@@ -674,28 +780,37 @@ export function applyCommand(
   }
   if (command.type === 'pickup') {
     if (!Number.isInteger(command.index)) return;
-    const l = MAP.loot[command.index];
+    const floor = command.index < MAP.loot.length;
+    const l = floor
+      ? MAP.loot[command.index]
+      : room.drops?.[command.index - MAP.loot.length];
     if (
       !l ||
-      room.loot[command.index] ||
+      (floor ? room.loot[command.index] : (l as WorldDrop).used) ||
       Math.hypot(l.x - p.x, l.z - p.z) > 3.8
     )
       return;
+    const drop = floor
+      ? { ...l, rarity: floorRarity(command.index), used: false }
+      : (l as WorldDrop);
     if (l.kind < 3) {
-      if (!p.owned[l.kind]) {
-        p.owned[l.kind] = true;
-        p.ammo[l.kind] = WEAPONS[l.kind].capacity;
+      const { first, upgrade } = collectGun(p, drop);
+      if (first || upgrade) {
         cancelRecovery(p);
-        p.weapon = l.kind;
         p.reloadUntil = 0;
       }
-      p.reserve[l.kind] += WEAPONS[l.kind].capacity * 2;
     } else {
       const slot = l.kind === 3 ? 'cells' : 'medkits';
       if (p[slot] >= SUPPLY_LIMIT) return;
-      p[slot]++;
+      const collected = Math.min(SUPPLY_LIMIT - p[slot], drop.amount ?? 1);
+      p[slot] += collected;
+      if (!floor) {
+        drop.amount = (drop.amount ?? 1) - collected;
+        if (drop.amount > 0) return;
+      }
     }
-    room.loot[command.index] = true;
+    if (floor) room.loot[command.index] = true;
+    else drop.used = true;
     event(room, { type: 'pickup', player: p.id, at: now });
   }
   advance(room, now);
@@ -704,6 +819,7 @@ export function snapshot(room: Room, now: number): RoomSnapshot {
   const zone = zoneAt(
     Math.max(0, (now - room.startAt) / 1000),
     `${room.code}:${room.round}`,
+    room.zonePlayers ?? 16,
   );
   return {
     code: room.code,
@@ -730,6 +846,7 @@ export function snapshot(room: Room, now: number): RoomSnapshot {
       }) => p,
     ),
     loot: room.loot,
+    drops: room.drops ?? [],
     events: [
       ...room.events.filter((e) => now - e.at < 1500),
       ...(room.marks ?? []).filter((e) => now - e.at < 8000),
@@ -775,7 +892,11 @@ export function parseCommand(value: unknown): Command {
     ['Go here', 'Enemy', 'Loot'].includes(c.label)
   )
     return { type: 'mark', point: c.point, label: c.label };
-  if ((c.type === 'pose' || c.type === 'shoot') && validPose(c.pose)) {
+  if (
+    (c.type === 'pose' || c.type === 'shoot' || c.type === 'mantle') &&
+    validPose(c.pose)
+  ) {
+    if (c.type === 'mantle') return { type: 'mantle', pose: c.pose };
     return c.type === 'pose'
       ? { type: 'pose', pose: c.pose }
       : { type: 'shoot', pose: c.pose, aiming: c.aiming === true };

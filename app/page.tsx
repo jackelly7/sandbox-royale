@@ -46,7 +46,7 @@ import type {
   RoomSession,
   ConnectionStatus,
 } from '@/lib/game/multiplayer';
-import { WEAPONS, SUPPLIES } from '@/lib/game/rules';
+import { WEAPONS, SUPPLIES, RARITIES } from '@/lib/game/rules';
 import { zoneAt } from '@/lib/game/zones';
 
 const initial: GameState = {
@@ -99,7 +99,8 @@ const controls = [
   ['LEFT CLICK', 'Fire'],
   ['RIGHT CLICK', 'Aim down sights'],
   ['SHIFT', 'Sprint'],
-  ['SPACE', 'Jump'],
+  ['C / CTRL', 'Toggle crouch / hold crouch'],
+  ['SPACE', 'Jump / mantle nearby cover'],
   ['R', 'Reload'],
   ['E', 'Collect / revive teammate'],
   ['G / Middle click', 'Ping enemy, loot, or location'],
@@ -810,6 +811,38 @@ export default function Home() {
             </div>
           )}
           <output className="game-notice">{state.notice}</output>
+          {playing &&
+            (state.crouching || state.sprinting || state.mantling) && (
+              <output className="movement-status">
+                {state.mantling
+                  ? 'MANTLING'
+                  : state.crouching
+                    ? 'CROUCHING · C TO STAND'
+                    : 'SPRINTING'}
+              </output>
+            )}
+          {playing && touch && (
+            <div className="touch-movement">
+              <button
+                aria-label="Toggle sprint"
+                onClick={() => {
+                  if (game.current)
+                    game.current.touchSprint = !game.current.touchSprint;
+                }}
+              >
+                SPRINT
+              </button>
+              <button
+                aria-label="Toggle crouch"
+                onClick={() => {
+                  if (game.current)
+                    game.current.crouchToggle = !game.current.crouchToggle;
+                }}
+              >
+                CROUCH
+              </button>
+            </div>
+          )}
           <div className="kill-feed" aria-label="Recent eliminations">
             {state.feed.map((e) => (
               <div key={e.id}>
@@ -1046,7 +1079,10 @@ export default function Home() {
                       disabled={!state.owned[i]}
                       aria-label={`${i + 1} ${w.name}${!state.owned[i] ? ', find this weapon' : ''}`}
                       style={
-                        { '--weapon-color': w.color } as React.CSSProperties
+                        {
+                          '--weapon-color':
+                            RARITIES[state.tiers?.[i] ?? 0].color,
+                        } as React.CSSProperties
                       }
                       onClick={() => game.current?.selectWeapon(i)}
                     >
@@ -1054,7 +1090,11 @@ export default function Home() {
                       <Crosshair size={22} />
                       <span>
                         {w.short}
-                        <small>{state.owned[i] ? 'READY' : 'FIND'}</small>
+                        <small>
+                          {state.owned[i]
+                            ? `${RARITIES[state.tiers?.[i] ?? 0].name} ${'◆'.repeat((state.tiers?.[i] ?? 0) + 1)}`
+                            : 'FIND'}
+                        </small>
                       </span>
                     </button>
                   ))}
@@ -1064,7 +1104,9 @@ export default function Home() {
                 <span>
                   {state.reloading
                     ? 'RELOADING'
-                    : (WEAPONS[state.weapon]?.short ?? 'UNARMED')}
+                    : state.weapon >= 0
+                      ? `${RARITIES[state.tiers?.[state.weapon] ?? 0].name} · ${WEAPONS[state.weapon].short}`
+                      : 'UNARMED'}
                 </span>
                 <div>
                   <b>
@@ -1181,8 +1223,7 @@ export default function Home() {
               <button
                 className="touch-jump"
                 onClick={() => {
-                  if (game.current && game.current.position.y <= 1.71)
-                    game.current.velocityY = 7;
+                  game.current?.jump();
                 }}
                 aria-label="Jump"
               >
@@ -1404,11 +1445,15 @@ export default function Home() {
                   Steer your parachute toward the glowing loot using WASD. You
                   land unarmed. Find an AR, shotgun, or sniper at a glowing drop
                   and press E to collect it. Use 1–3 or the scroll wheel to
-                  switch between weapons you have collected. Red medkits and
-                  blue shield cells go into your inventory. Press Q to heal or F
-                  to restore shields. Carry up to three of each. Healing
-                  continues when you take damage. Firing, switching weapons, or
-                  reloading cancels healing without using the item.
+                  switch between weapons you have collected. Common weapons are
+                  gray, Rare blue, Epic purple, and Legendary gold. Higher tiers
+                  deal more damage. Eliminated rivals drop their equipment.
+                  Press C to crouch, Shift to sprint, and Space near low cover
+                  to mantle onto it. Red medkits and blue shield cells go into
+                  your inventory. Press Q to heal or F to restore shields. Carry
+                  up to three of each. Healing continues when you take damage.
+                  Firing, switching weapons, or reloading cancels healing
+                  without using the item.
                 </p>
               </div>
               <p className="touch-help">

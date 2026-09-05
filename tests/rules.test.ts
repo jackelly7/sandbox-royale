@@ -11,7 +11,7 @@ import {
 
 void test('storm gives players a grace period then closes in phases to the final circle', () => {
   assert.equal(stormRadius(0), 107);
-  assert.equal(stormRadius(35), 107);
+  assert.equal(stormRadius(18), 107);
   assert.ok(stormRadius(100) < stormRadius(50));
   assert.equal(stormRadius(270), 5);
   assert.equal(stormRadius(900), 5);

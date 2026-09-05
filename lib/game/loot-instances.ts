@@ -1,5 +1,6 @@
+import { lootColor } from './loot.ts';
 import * as THREE from 'three';
-type Drop = { mesh: THREE.Group; kind: number; used: boolean };
+type Drop = { mesh: THREE.Group; kind: number; rarity?: number; used: boolean };
 export class LootInstances {
   root = new THREE.Group();
   batches: {
@@ -17,12 +18,11 @@ export class LootInstances {
     for (const drop of drops)
       for (let part = 0; part < 3; part++) {
         const p = drop.mesh.position;
-        const key = `${p.x < 0 ? 0 : 1}:${p.z < 0 ? 0 : 1}:${part}:${part === 0 ? drop.kind : 'all'}`;
+        const key = `${p.x < 0 ? 0 : 1}:${p.z < 0 ? 0 : 1}:${part}:${part === 0 ? `${drop.kind}:${drop.rarity ?? 0}` : 'all'}`;
         const entries = groups.get(key) ?? [];
         entries.push({ drop, part });
         groups.set(key, entries);
       }
-    const colors = ['#85e2bc', '#ffc06a', '#cf9cf4', '#78dfee', '#ff7474'];
     for (const entries of groups.values()) {
       const { drop, part } = entries[0];
       const object = drop.mesh.children[part];
@@ -59,7 +59,11 @@ export class LootInstances {
           drop.mesh.position.z,
         );
         mesh.setMatrixAt(i, this.matrix);
-        if (part !== 0) mesh.setColorAt(i, new THREE.Color(colors[drop.kind]));
+        if (part !== 0)
+          mesh.setColorAt(
+            i,
+            new THREE.Color(lootColor(drop.kind, drop.rarity)),
+          );
       });
       mesh.computeBoundingSphere();
       if (mesh.boundingSphere) mesh.boundingSphere.radius += 1;
