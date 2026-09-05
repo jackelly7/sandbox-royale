@@ -29,7 +29,7 @@ function room() {
   applyCommand(r, 'a', { type: 'start' }, 1000);
   advance(r, 6000);
   for (const p of r.players)
-    Object.assign(p, { dropping: false, y: 1.7, lastSeen: 6000 });
+    Object.assign(p, { dropping: false, onBus: false, y: 1.7, lastSeen: 6000 });
   return r;
 }
 void test('eighteen chests vary by round and always include both accessible castle halls', () => {

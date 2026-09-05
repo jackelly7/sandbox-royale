@@ -488,6 +488,7 @@ void test('third-person fire converges from the body and cannot shoot past cover
   target.mesh.position.set(0, 0, 0);
   game.perspective = 'third';
   game.state.weapon = 0;
+  game.aiming = true; // Test cover and convergence without random hip-fire misses.
   game.position.set(0, 1.7, 10);
   game.camera.position.set(3, 2.2, 14);
   game.camera.lookAt(0, 1.4, 0);

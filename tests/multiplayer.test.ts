@@ -32,8 +32,10 @@ function started() {
   const room = waiting();
   applyCommand(room, 'host', { type: 'start' }, at);
   advance(room, at + 5001);
+  room.busDuration = 0;
   room.players.forEach((p) => {
     p.dropping = false;
+    p.onBus = false;
     p.y = 1.7;
     p.lastSeen = at + 5001;
     p.connected = true;
@@ -401,27 +403,30 @@ void test('the opening drop is server controlled, steerable, and ends outside bu
   const room = waiting();
   applyCommand(room, 'host', { type: 'start' }, at);
   const p = room.players[0];
-  assert.equal(p.y, 42);
+  assert.equal(p.y, 65);
   assert.equal(p.dropping, true);
   advance(room, at + 4000);
-  assert.equal(p.y, 42, 'Countdown holds altitude');
+  assert.equal(p.y, 65, 'Countdown holds bus altitude');
   advance(room, at + 6000);
-  assert.equal(p.y, 36);
+  assert.equal(p.y, 65);
+  applyCommand(room, p.id, { type: 'jumpBus' }, at + 6000);
   const oldX = p.x;
   applyCommand(
     room,
     p.id,
-    { type: 'pose', pose: { ...p, x: oldX + 2, y: 1.7 } },
+    { type: 'pose', pose: { ...p, x: oldX + 0.5, y: 1.7 } },
     at + 6100,
   );
-  assert.equal(p.x, oldX + 2, 'The canopy can be steered');
+  assert.equal(p.x, oldX + 0.5, 'The canopy can be steered');
   assert.ok(p.y > 30, 'A client cannot instantly land');
   Object.assign(p, { x: MAP.loot[0].x, z: MAP.loot[0].z });
   applyCommand(room, p.id, { type: 'pickup', index: 0 }, at + 6200);
   assert.equal(room.loot[0], false, 'Cannot claim ground loot from the sky');
   p.x = 18;
   p.z = -23;
-  advance(room, at + 12000);
+  p.lastSeen = at + 18000;
+  room.players[1].lastSeen = at + 18000;
+  advance(room, at + 18000);
   assert.equal(p.dropping, false);
   assert.equal(p.y, 1.7);
   assert.equal(
@@ -429,7 +434,7 @@ void test('the opening drop is server controlled, steerable, and ends outside bu
     false,
     'Landing over a roof resolves to clear ground nearby',
   );
-  applyCommand(room, p.id, { type: 'pose', pose: { ...p, y: 42 } }, at + 12100);
+  applyCommand(room, p.id, { type: 'pose', pose: { ...p, y: 42 } }, at + 18100);
   assert.equal(p.y, 3.8, 'A landed player cannot start flying again');
 });
 void test('killer identity remains available after transient elimination events expire', () => {

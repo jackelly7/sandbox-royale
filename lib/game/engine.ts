@@ -1,4 +1,13 @@
 import {
+  BUS_SECONDS,
+  busPosition,
+  padAt,
+  glideHeight,
+  LIFT_SECONDS,
+} from './traversal.ts';
+import { LAUNCH_PADS } from './traversal.ts';
+import { launchPadModel, dropBusModel } from './traversal-models.ts';
+import {
   CHEST_SPOTS,
   chestLayout,
   chestDrops,
@@ -75,7 +84,6 @@ import {
   SUPPLIES,
   SUPPLY_LIMIT,
   DROP_HEIGHT,
-  DROP_SPEED,
   beginRecovery,
   cancelRecovery,
   completeRecovery,
@@ -131,6 +139,10 @@ export type GameState = RecoveryState & {
   }[];
   healRemaining: number;
   dropping: boolean;
+  onBus?: boolean;
+  busRemaining?: number;
+  mapOpen?: boolean;
+  squadPoints?: { x: number; z: number; name: string }[];
   altitude: number;
   threat: number;
   killer: string;
@@ -166,6 +178,9 @@ type Bot = {
   ammunition?: number;
   dropping: boolean;
   dying: number;
+  busJumpAt?: number;
+  liftRemaining?: number;
+  launchAt?: number;
   deathY: number;
 };
 type Loot = {
@@ -299,6 +314,9 @@ export class BattleGame {
   spectatorId: string | null = null;
   killerId: string | null = null;
   parachute = parachuteModel();
+  dropBus = dropBusModel();
+  liftRemaining = 0;
+  launchAt = -100;
   correction = new THREE.Vector3();
   renderStats = { before: 0, after: 0 };
   framesRendered = 0;
@@ -387,6 +405,8 @@ export class BattleGame {
       this.loot.map((l) => l.mesh),
     );
     this.world.updateMatrixWorld(true);
+    this.scene.add(this.dropBus);
+    this.dropBus.visible = false;
     this.scene.add(this.parachute);
     this.parachute.visible = false;
     this.buildGun();
@@ -758,6 +778,11 @@ export class BattleGame {
     }
     this.rebuildLoot();
     this.resetChests('sandbox');
+    for (const p of LAUNCH_PADS) {
+      const pad = launchPadModel();
+      pad.position.set(p.x, 0, p.z);
+      this.world.add(pad);
+    }
     this.world.updateMatrixWorld(true);
   }
   buildCastle(x: number, z: number, color: string) {
@@ -1241,6 +1266,23 @@ export class BattleGame {
       this.cleanup.push(() => target.removeEventListener(type, fn));
     };
     on(document, 'keydown', ((e: KeyboardEvent) => {
+      if (
+        !this.menuOpen &&
+        ['playing', 'spectating'].includes(this.state.phase) &&
+        e.code === 'KeyM'
+      ) {
+        e.preventDefault();
+        if (!e.repeat) this.toggleMap();
+        return;
+      }
+      if (this.state.mapOpen) {
+        if (e.code === 'Escape') {
+          e.preventDefault();
+          this.toggleMap();
+        }
+        return;
+      }
+
       if (this.state.phase === 'spectating' && !this.menuOpen) {
         if (e.code === 'BracketLeft' || e.code === 'BracketRight') {
           e.preventDefault();
@@ -1298,12 +1340,13 @@ export class BattleGame {
     on(document, 'mousemove', ((e: MouseEvent) => {
       if (
         document.pointerLockElement === this.renderer.domElement &&
-        this.state.phase === 'playing'
+        this.state.phase === 'playing' &&
+        !this.state.mapOpen
       )
         this.look(e.movementX, e.movementY);
     }) as EventListener);
     on(this.renderer.domElement, 'mousedown', ((e: MouseEvent) => {
-      if (this.state.phase === 'playing') {
+      if (this.state.phase === 'playing' && !this.state.mapOpen) {
         if (e.button === 0) {
           this.triggerHeld = false;
           this.shooting = true;
@@ -1479,6 +1522,20 @@ export class BattleGame {
     this.emit();
   }
   updatePlayerCamera() {
+    if (this.state.onBus) {
+      this.camera.position.set(
+        this.position.x + Math.sin(this.yaw) * 18,
+        this.position.y + 12,
+        this.position.z + Math.cos(this.yaw) * 18,
+      );
+      this.camera.lookAt(
+        this.position.x,
+        this.position.y + 5 + Math.sin(this.pitch) * 8,
+        this.position.z,
+      );
+      if (this.avatar) this.avatar.visible = false;
+      return;
+    }
     const eye = this.position.clone();
     eye.y -= this.crouchOffset || 0;
     if (this.isDowned()) eye.y -= 0.95;
@@ -1656,6 +1713,15 @@ export class BattleGame {
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
+  toggleMap() {
+    this.state.mapOpen = !this.state.mapOpen;
+    this.shooting = false;
+    this.triggerHeld = false;
+    this.setAiming(false);
+    this.keys.clear();
+    this.touchMove = { x: 0, y: 0 };
+    this.emit();
+  }
   setMenuOpen(open: boolean) {
     this.menuOpen = open;
     if (open && this.state.phase === 'playing') this.pause();
@@ -1672,6 +1738,9 @@ export class BattleGame {
         healUntil: 0,
         healRemaining: 0,
         dropping: true,
+        onBus: true,
+        mapOpen: false,
+        busRemaining: BUS_SECONDS,
         altitude: DROP_HEIGHT,
         threat: 0,
         killer: 'The sandbox',
@@ -1709,7 +1778,10 @@ export class BattleGame {
       this.crouchToggle = false;
       this.crouchOffset = 0;
       this.motion?.set(0, 0);
-      this.position.set(0, DROP_HEIGHT, SPAWN_RADIUS);
+      const bus = busPosition(0);
+      this.position.set(bus.x, bus.y, bus.z);
+      this.liftRemaining = 0;
+      this.launchAt = -100;
       this.yaw = 0;
       this.pitch = -0.6;
       this.velocityY = 0;
@@ -1720,10 +1792,11 @@ export class BattleGame {
       this.zoneCue = '';
       this.cooldown = 0.3;
       this.resetBots();
-      for (const b of this.bots) {
-        b.mesh.position.y = DROP_HEIGHT - 1.7;
+      this.bots.forEach((b, i) => {
+        b.mesh.position.set(bus.x, bus.y - 1.7, bus.z);
+        b.busJumpAt = 1 + i * 1.05;
         b.dropping = true;
-      }
+      });
       this.spawnLoot();
       this.noticeTimer = 5;
       this.zoneSeed = String(Math.random());
@@ -1762,6 +1835,7 @@ export class BattleGame {
   pause() {
     if (this.state.phase !== 'playing') return;
     this.state.phase = 'paused';
+    this.state.mapOpen = false;
     this.keys.clear();
     this.shooting = false;
     this.aiming = false;
@@ -1771,6 +1845,7 @@ export class BattleGame {
   }
   lobby() {
     this.state.phase = 'lobby';
+    this.state.mapOpen = false;
     this.state.spectator = null;
     this.spectatorId = null;
     this.keys.clear();
@@ -2419,6 +2494,8 @@ export class BattleGame {
     this.emit();
   }
   finish(won: boolean) {
+    this.state.mapOpen = false;
+    this.state.onBus = false;
     if (!this.network) this.state.rank = won ? 1 : this.state.alive;
     if (!won && !this.network) {
       for (const drop of eliminationDrops(
@@ -2478,6 +2555,16 @@ export class BattleGame {
     return this.physicsCache;
   }
   jump() {
+    if (this.state.phase === 'playing' && this.state.onBus) {
+      if (this.network) {
+        if (this.networkRoom?.phase === 'playing')
+          this.network.send({ type: 'jumpBus' });
+      } else {
+        this.state.onBus = false;
+        this.notice('Steer toward your landing spot.');
+      }
+      return;
+    }
     if (
       this.state.phase !== 'playing' ||
       this.state.dropping ||
@@ -2535,8 +2622,17 @@ export class BattleGame {
     for (const b of this.bots) {
       if (b.hp <= 0) continue;
       const p = b.mesh.position;
+      if (b.busJumpAt !== undefined && this.state.elapsed < b.busJumpAt) {
+        const bus = busPosition(this.state.elapsed);
+        p.set(bus.x, bus.y - 1.7, bus.z);
+        b.mesh.visible = false;
+        continue;
+      }
+      b.mesh.visible = true;
+      b.busJumpAt = undefined;
       if (b.dropping) {
-        p.y = Math.max(0, p.y - DROP_SPEED * dt);
+        p.y = glideHeight(p.y + 1.7, dt, b.liftRemaining ?? 0) - 1.7;
+        b.liftRemaining = Math.max(0, (b.liftRemaining ?? 0) - dt);
         if (p.y === 0) {
           p.copy(this.safePosition(p.x, p.z));
           b.dropping = false;
@@ -2555,6 +2651,15 @@ export class BattleGame {
             p.add(delta);
           }
         }
+        continue;
+      }
+      if (
+        this.time - (b.launchAt ?? -100) > 6 &&
+        padAt(p.x, p.y + 1.7, p.z) >= 0
+      ) {
+        b.dropping = true;
+        b.liftRemaining = LIFT_SECONDS;
+        b.launchAt = this.time;
         continue;
       }
       b.cooldown -= dt;
@@ -2837,7 +2942,10 @@ export class BattleGame {
         ? Math.max(0, (this.state.healUntil - this.state.elapsed * 1000) / 1000)
         : 0;
       if (!this.network)
-        this.state.zone = zoneAt(this.state.elapsed, this.zoneSeed);
+        this.state.zone = zoneAt(
+          Math.max(0, this.state.elapsed - BUS_SECONDS),
+          this.zoneSeed,
+        );
       this.state.storm = this.state.zone?.radius ?? this.state.storm;
       this.storm.position.set(
         this.state.zone?.x ?? 0,
@@ -2876,6 +2984,10 @@ export class BattleGame {
           Number(this.keys.has('KeyW')) -
           Number(this.keys.has('KeyS')) -
           this.touchMove.y;
+      if (this.state.mapOpen || this.state.onBus) {
+        mx = 0;
+        mz = 0;
+      }
       const length = Math.hypot(mx, mz);
       if (length > 1) {
         mx /= length;
@@ -2919,7 +3031,7 @@ export class BattleGame {
         (-mx * Math.sin(this.yaw) - mz * Math.cos(this.yaw)) * speed * pace,
         dt,
       );
-      if (!this.mantle)
+      if (!this.mantle && !this.state.onBus)
         this.move(
           this.position,
           this.motion.x * dt,
@@ -2930,9 +3042,21 @@ export class BattleGame {
       if (this.keys.has('ArrowRight')) this.yaw -= dt * 1.5;
       if (this.network && this.networkRoom?.phase === 'countdown')
         this.velocityY = 0;
-      if (this.state.dropping) {
+      if (this.state.onBus) {
+        const bus = busPosition(this.state.elapsed);
+        this.position.set(bus.x, bus.y, bus.z);
+        this.motion.set(0, 0);
+        this.velocityY = 0;
+        if (!this.network && this.state.elapsed >= BUS_SECONDS)
+          this.state.onBus = false;
+      } else if (this.state.dropping) {
         if (!this.network || this.networkRoom?.phase === 'playing')
-          this.position.y = Math.max(1.7, this.position.y - DROP_SPEED * dt);
+          this.position.y = glideHeight(
+            this.position.y,
+            dt,
+            this.liftRemaining,
+          );
+        this.liftRemaining = Math.max(0, this.liftRemaining - dt);
         this.velocityY = 0;
         if (!this.network && this.position.y <= 1.7) {
           this.state.dropping = false;
@@ -2963,6 +3087,24 @@ export class BattleGame {
           this.position.y + this.velocityY * dt,
         );
         if (this.position.y <= floor) this.velocityY = 0;
+      }
+      if (
+        !this.network &&
+        !this.state.dropping &&
+        !this.isDowned() &&
+        !this.mantle &&
+        this.time - this.launchAt > 6 &&
+        padAt(this.position.x, this.position.y, this.position.z) >= 0
+      ) {
+        this.state.dropping = true;
+        this.liftRemaining = LIFT_SECONDS;
+        this.launchAt = this.time;
+        this.cancelHeal();
+        this.reloadTimer = 0;
+        this.state.reloading = false;
+        this.setAiming(false);
+        this.notice('Launched! Steer toward your next landing.');
+        this.sound(420, 0.3, 0.05, 'sine');
       }
       this.state.mantling = !!this.mantle;
       this.state.altitude = Math.max(0, this.position.y - 1.7);
@@ -3146,16 +3288,39 @@ export class BattleGame {
       if (['playing', 'spectating', 'dying'].includes(this.state.phase))
         this.emit();
     }
+    if (this.dropBus) {
+      const duration = this.network
+        ? (this.networkRoom?.busDuration ?? 0)
+        : BUS_SECONDS;
+      this.state.busRemaining = Math.max(0, duration - this.state.elapsed);
+      this.dropBus.visible =
+        this.state.phase !== 'lobby' &&
+        duration > 0 &&
+        this.state.elapsed < duration;
+      const bus = busPosition(this.state.elapsed);
+      // Ride beside the bus so its body never fills the first-person view.
+      this.dropBus.position.set(bus.x, bus.y + 3, bus.z);
+      this.dropBus.rotation.y = Math.atan2(-280, -130);
+    }
     if (this.parachute) {
       this.parachute.visible =
-        this.state.dropping && this.state.phase === 'playing';
+        this.state.dropping &&
+        !this.state.onBus &&
+        this.liftRemaining <= 0 &&
+        this.state.phase === 'playing';
       this.parachute.position
         .copy(this.position)
         .add(new THREE.Vector3(0, -1.7, 0));
     }
     for (const b of this.bots) {
       const chute = b.mesh.getObjectByName('Parachute');
-      if (chute) chute.visible = b.dropping && b.hp > 0;
+      if (chute)
+        chute.visible =
+          b.dropping &&
+          b.hp > 0 &&
+          b.mesh.visible &&
+          !b.busJumpAt &&
+          !(b.liftRemaining && b.liftRemaining > 0);
       if (b.hp <= 0 && b.dying > 0) {
         b.dying = Math.max(0, b.dying - dt);
         const progress = 1 - b.dying / 0.9;
@@ -3317,6 +3482,7 @@ export class BattleGame {
       this.state.damageNumber = 0;
       this.state.damageAngle = null;
       this.state.shieldBreak = 0;
+      this.state.mapOpen = false;
       this.state.weapon = -1;
       this.state.owned = [...me.owned];
       this.state.tiers = [...(me.tiers ?? [0, 0, 0])];
@@ -3401,7 +3567,7 @@ export class BattleGame {
       b.hp = p.health;
       b.shield = p.shield;
       b.dropping = p.dropping;
-      b.mesh.visible = p.health > 0 || b.dying > 0;
+      b.mesh.visible = !p.onBus && (p.health > 0 || b.dying > 0);
       b.mesh.rotation.y = p.yaw + Math.PI;
       return new THREE.Vector3(p.x, p.y - 1.7, p.z);
     });
@@ -3423,7 +3589,13 @@ export class BattleGame {
       this.motion?.set(0, 0);
       this.crouchToggle = false;
     }
-    if (!newRound && acknowledgedPose && !this.mantle) {
+    if (
+      !newRound &&
+      acknowledgedPose &&
+      !this.mantle &&
+      !me.onBus &&
+      !previousRoom?.players.find((p) => p.id === me.id)?.onBus
+    ) {
       const correctionX = me.x - acknowledgedPose.x,
         correctionZ = me.z - acknowledgedPose.z;
       if (Math.hypot(correctionX, correctionZ) > 0.05) {
@@ -3440,7 +3612,39 @@ export class BattleGame {
       (me.health < this.state.health || me.shield < this.state.shield)
     )
       this.state.hurt = 0.3;
-    if (me.dropping)
+    if (
+      me.onBus ||
+      (this.state.onBus && !me.onBus) ||
+      (me.launchAt !==
+        previousRoom?.players.find((p) => p.id === me.id)?.launchAt &&
+        me.dropping)
+    ) {
+      this.position.set(me.x, me.y, me.z);
+      this.correction.set(0, 0, 0);
+      this.motion.set(0, 0);
+    }
+    if (
+      !newRound &&
+      (me.launchAt ?? 0) > 0 &&
+      me.launchAt !==
+        previousRoom?.players.find((p) => p.id === me.id)?.launchAt
+    ) {
+      this.setAiming(false);
+      this.notice('Launched! Steer toward your next landing.');
+      this.sound(420, 0.3, 0.05, 'sine');
+    }
+    this.state.onBus = me.onBus && me.health > 0;
+    this.liftRemaining = Math.max(
+      0,
+      ((me.launchAt ?? -10000) + LIFT_SECONDS * 1000 - room.now) / 1000,
+    );
+    this.state.squadPoints =
+      room.mode === 'duos'
+        ? room.players
+            .filter((p) => p.id !== me.id && p.team === me.team && p.health > 0)
+            .map((p) => ({ x: p.x, z: p.z, name: p.name }))
+        : [];
+    if (me.dropping && !me.onBus)
       this.position.y = THREE.MathUtils.lerp(this.position.y, me.y, 0.5);
     if (this.state.dropping && !me.dropping && me.health > 0) {
       this.position.set(me.x, me.y, me.z);

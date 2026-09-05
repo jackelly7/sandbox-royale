@@ -25,6 +25,9 @@ export type Player = PlayerPose &
     ready?: boolean;
     pickedUpAt?: number;
     dropping: boolean;
+    onBus?: boolean;
+    bot?: boolean;
+    launchAt?: number;
     killedBy: string | null;
     diedAt: number;
     spectator?: boolean;
@@ -63,6 +66,8 @@ export type RoomSnapshot = {
   events: GameEvent[];
   mode?: 'solo' | 'duos';
   winningTeam?: number | null;
+  botCount?: number;
+  busDuration?: number;
 };
 export type GameEvent = {
   id: string;
@@ -99,6 +104,8 @@ export type Command =
   | { type: 'cancelHeal' }
   | { type: 'pickup'; index: number }
   | { type: 'chest'; index: number }
+  | { type: 'jumpBus' }
+  | { type: 'bots'; count: number }
   | { type: 'ready' }
   | { type: 'start' }
   | { type: 'rematch' }

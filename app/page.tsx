@@ -1,4 +1,11 @@
 'use client';
+import {
+  BUS_SECONDS,
+  BUS_FROM,
+  BUS_TO,
+  busPosition,
+  LAUNCH_PADS,
+} from '@/lib/game/traversal';
 
 import { ARENA_SCALE, INITIAL_CIRCLE } from '../lib/game/arena';
 
@@ -103,7 +110,8 @@ const controls = [
   ['RIGHT CLICK', 'Aim down sights'],
   ['SHIFT', 'Sprint'],
   ['C / CTRL', 'Toggle crouch / hold crouch'],
-  ['SPACE', 'Jump / mantle nearby cover'],
+  ['SPACE', 'Jump from bus / jump / mantle'],
+  ['M', 'Open / close tactical map'],
   ['R', 'Reload'],
   ['V', 'Switch first / third person'],
   ['E', 'Collect / revive teammate'],
@@ -245,6 +253,61 @@ function IslandMap({
         height="240"
         fill={`url(#${large ? 'grid-big' : 'grid-small'})`}
       />
+      {LAUNCH_PADS.map((p, i) => (
+        <g
+          key={`pad-${i}`}
+          transform={`translate(${p.x / ARENA_SCALE},${p.z / ARENA_SCALE})`}
+        >
+          <circle
+            r={large ? 3 : 2.4}
+            fill="#71eaca"
+            stroke="#1c3c38"
+            strokeWidth="1"
+          />
+          <path d="M-1.5 1 0-1.5 1.5 1" fill="none" stroke="#123b32" />
+          <title>Launch pad</title>
+        </g>
+      ))}
+      {!!worldState.busRemaining && (
+        <g>
+          <line
+            x1={BUS_FROM.x / ARENA_SCALE}
+            y1={BUS_FROM.z / ARENA_SCALE}
+            x2={BUS_TO.x / ARENA_SCALE}
+            y2={BUS_TO.z / ARENA_SCALE}
+            stroke="#fff"
+            strokeWidth="1.3"
+            strokeDasharray="4 3"
+          />
+          <circle
+            cx={
+              busPosition(BUS_SECONDS - worldState.busRemaining).x / ARENA_SCALE
+            }
+            cy={
+              busPosition(BUS_SECONDS - worldState.busRemaining).z / ARENA_SCALE
+            }
+            r="4"
+            fill="#f6c955"
+            stroke="#222"
+            strokeWidth="1"
+          >
+            <title>Drop bus</title>
+          </circle>
+        </g>
+      )}
+      {worldState.squadPoints?.map((p, i) => (
+        <circle
+          key={`mate-${i}`}
+          cx={p.x / ARENA_SCALE}
+          cy={p.z / ARENA_SCALE}
+          r="3"
+          fill="#71eaca"
+          stroke="#fff"
+          strokeWidth="1"
+        >
+          <title>{p.name}</title>
+        </circle>
+      ))}
       {state.phase !== 'lobby' && (
         <>
           <path
@@ -293,10 +356,10 @@ function IslandMap({
             SANDCASTLE SQUARE
           </text>
           <text x="-34" y="44">
-            PALM GROVE
+            TOY GROVE
           </text>
           <text x="3" y="-72">
-            NORTH PIER
+            NORTH RIM
           </text>
         </>
       )}
@@ -711,6 +774,13 @@ export default function Home() {
               <b>{state.kills}</b> ELIMS
             </span>
           </div>
+          <button
+            className="map-toggle"
+            onClick={() => game.current?.toggleMap()}
+            aria-label="Open map"
+          >
+            M · MAP
+          </button>
           <div className="minimap">
             <IslandMap state={state} />
             <div className={`storm-timer ${state.outside ? 'danger' : ''}`}>
@@ -744,7 +814,7 @@ export default function Home() {
                 </span>
               </div>
             )}
-          {playing && (
+          {playing && !state.onBus && !state.mapOpen && (
             <div
               className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : state.weapon === 2 ? 'sniper-hip' : state.weapon === 0 ? 'rifle-hip' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
             >
@@ -950,7 +1020,57 @@ export default function Home() {
               <Skull size={23} /> ELIMINATION CONFIRMED
             </div>
           )}
-          {playing && state.dropping && (
+          {state.mapOpen && (playing || state.phase === 'spectating') && (
+            <section className="tactical-map-overlay" aria-label="Tactical map">
+              <div className="tactical-map-card">
+                <div className="tactical-map-title">
+                  <strong>THE SANDBOX</strong>
+                  <button onClick={() => game.current?.toggleMap()}>
+                    Close · M / Esc
+                  </button>
+                </div>
+                <IslandMap state={state} large />
+                <p>
+                  Mint circles: launch pads · Yellow: drop bus · White dashed
+                  ring: next circle
+                </p>
+                <small>The match continues while the map is open.</small>
+                {state.onBus && (
+                  <button
+                    className="secondary-button"
+                    onClick={() => {
+                      game.current?.toggleMap();
+                      game.current?.jump();
+                    }}
+                  >
+                    JUMP FROM BUS
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
+          {playing && state.onBus && !state.mapOpen && (
+            <div className="drop-guidance">
+              <span>SANDBOX DROP BUS</span>
+              <strong>{Math.ceil(state.busRemaining ?? BUS_SECONDS)}s</strong>
+              <p>
+                Choose your landing spot.{' '}
+                {touch ? 'Tap to jump.' : 'Space to jump · M to plan your drop'}
+              </p>
+              <small>
+                Everyone still aboard drops at the end of the route.
+              </small>
+              {touch && (
+                <button
+                  className="secondary-button"
+                  onClick={() => game.current?.jump()}
+                >
+                  JUMP
+                </button>
+              )}
+            </div>
+          )}
+          {playing && state.dropping && !state.onBus && !state.mapOpen && (
             <>
               <div className="drop-guidance">
                 <span>PARACHUTE DEPLOYED</span>
@@ -960,7 +1080,7 @@ export default function Home() {
                     ? 'Use the left stick to steer toward loot'
                     : 'W A S D to steer · Move mouse to look for loot'}
                 </p>
-                <small>You land unarmed. Pick a glowing drop below.</small>
+                <small>Steer toward cover, chests, and supplies.</small>
               </div>
             </>
           )}
@@ -1451,7 +1571,7 @@ export default function Home() {
                   aria-label="Players ready for next round"
                 >
                   {room.players
-                    .filter((p) => p.connected)
+                    .filter((p) => p.connected && !p.bot)
                     .map((p) => (
                       <span key={p.id} className={p.ready ? 'is-ready' : ''}>
                         {p.ready ? '✓' : '○'} {p.name}
@@ -1469,8 +1589,12 @@ export default function Home() {
                   <RotateCcw size={22} />
                 </button>
                 <output className="ready-status">
-                  {room.players.filter((p) => p.connected && p.ready).length}/
-                  {room.players.filter((p) => p.connected).length} ready.{' '}
+                  {
+                    room.players.filter((p) => p.connected && !p.bot && p.ready)
+                      .length
+                  }
+                  /{room.players.filter((p) => p.connected && !p.bot).length}{' '}
+                  ready.{' '}
                   {room.players.filter((p) => p.connected).length < 2
                     ? 'Invite a friend to play again.'
                     : 'The next drop starts when everyone is ready.'}

@@ -28,6 +28,7 @@ function squad() {
   r.players.forEach((p, i) =>
     Object.assign(p, {
       dropping: false,
+      onBus: false,
       x: i % 2 ? 20 : 0,
       z: 50,
       y: 1.7,

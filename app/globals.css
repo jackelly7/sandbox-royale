@@ -3556,3 +3556,76 @@ kbd {
   width: 40px;
   height: 40px;
 }
+
+.map-toggle {
+  position: absolute;
+  right: 28px;
+  top: 222px;
+  z-index: 4;
+  padding: 7px 12px;
+  border: 1px solid #ffffff70;
+  border-radius: 5px;
+  background: #202b30e8;
+  color: white;
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 13px;
+  pointer-events: auto;
+}
+.tactical-map-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 45;
+  display: grid;
+  place-items: center;
+  background: #101b23c9;
+  pointer-events: auto;
+  padding: 16px;
+}
+.tactical-map-card {
+  width: min(680px, 92vw);
+  max-height: 95vh;
+  overflow: auto;
+  background: #202b30;
+  padding: 18px;
+  border: 1px solid #ffffff60;
+  border-radius: 12px;
+  color: white;
+}
+.tactical-map-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.tactical-map-title button {
+  color: white;
+  background: #ffffff18;
+  padding: 8px 12px;
+  border-radius: 5px;
+}
+.tactical-map-card .island-map {
+  display: block;
+  width: min(100%, 66vh);
+  height: auto;
+  margin: 12px auto;
+}
+.tactical-map-card p {
+  font-size: 14px;
+  margin: 10px 0 4px;
+}
+.tactical-map-card small {
+  color: #b8c7ca;
+  font-size: 13px;
+}
+@media (max-width: 700px) {
+  .map-toggle {
+    right: 14px;
+    top: 176px;
+  }
+}
+
+.drop-guidance button {
+  pointer-events: auto;
+  margin-top: 10px;
+}

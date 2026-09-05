@@ -141,8 +141,9 @@ export function FriendsRoom({
           </p>
         )}
         <p className="touch-help">
-          2–8 players. Land in the sandbox unarmed. Collect an AR, shotgun, or
-          sniper. The host starts the match when everyone has joined.
+          Up to 8 friends, plus optional bots. Ride the drop bus and choose
+          where to jump. Collect an AR, shotgun, or sniper. The host starts the
+          match when everyone has joined.
         </p>
       </div>
     );
@@ -173,7 +174,9 @@ export function FriendsRoom({
             : status === 'offline'
               ? 'DISCONNECTED'
               : 'CONNECTING...'}
-        <span>{room?.players.length ?? 1} / 8 PLAYERS</span>
+        <span>
+          {room?.players.filter((p) => !p.bot).length ?? 1} / 8 FRIENDS
+        </span>
       </div>
       {room?.phase === 'waiting' && (
         <div className="room-mode-controls">
@@ -190,6 +193,20 @@ export function FriendsRoom({
               </button>
             ))}
           </div>
+          <span>Bot opponents</span>
+          <div className="mode-options">
+            {[0, 4, 8].map((count) => (
+              <button
+                key={count}
+                disabled={!isHost || status !== 'connected'}
+                aria-pressed={(room.botCount ?? 0) === count}
+                onClick={() => command({ type: 'bots', count })}
+              >
+                {count === 0 ? 'No bots' : `${count} bots`}
+              </button>
+            ))}
+          </div>
+          <p>Bots loot and fight everyone. Friends keep all 8 human seats.</p>
           {room.mode === 'duos' && (
             <>
               <p>Choose the same team as your friend. Two players per team.</p>
@@ -263,7 +280,9 @@ export function FriendsRoom({
             disabled={
               !isHost ||
               status !== 'connected' ||
-              room.players.filter((p) => p.connected).length < 2
+              room.players.filter((p) => p.connected && !p.bot).length +
+                (room.botCount ?? 0) <
+                2
             }
             onClick={() => command({ type: 'start' })}
           >
@@ -271,8 +290,9 @@ export function FriendsRoom({
             <ArrowRight size={22} />
           </button>
           <p className="touch-help">
-            {room.players.length < 2
-              ? 'Share your invite link. You need at least one friend to start.'
+            {room.players.filter((p) => !p.bot).length < 2 &&
+            !(room.botCount ?? 0)
+              ? 'Share your invite link. Invite a friend or turn on bots to start.'
               : isHost
                 ? 'Everyone here joins the match. Ready to drop?'
                 : 'The host will start the match when everyone is here.'}
@@ -296,9 +316,12 @@ export function FriendsRoom({
             <ArrowRight size={22} />
           </button>
           <p className="touch-help">
-            {room.players.filter((p) => p.connected && p.ready).length}/
-            {room.players.filter((p) => p.connected).length} ready. The next
-            drop starts when everyone is ready.
+            {
+              room.players.filter((p) => p.connected && !p.bot && p.ready)
+                .length
+            }
+            /{room.players.filter((p) => p.connected && !p.bot).length} ready.
+            The next drop starts when everyone is ready.
           </p>
         </>
       )}

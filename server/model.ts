@@ -1,3 +1,11 @@
+import { updateRoomBots } from './bots.ts';
+import {
+  BUS_SECONDS,
+  busPosition,
+  padAt,
+  glideHeight,
+  LIFT_SECONDS,
+} from '../lib/game/traversal.ts';
 import {
   CHEST_SPOTS,
   chestLayout,
@@ -35,8 +43,6 @@ import {
   takeDamage,
   reloadAmmo,
   SUPPLY_LIMIT,
-  DROP_HEIGHT,
-  DROP_SPEED,
   beginRecovery,
   cancelRecovery,
   completeRecovery,
@@ -57,6 +63,13 @@ export type Member = Player & {
   lastCommand: number;
   commandError?: string;
   lastMark?: number;
+  ai?: {
+    thinkAt: number;
+    jumpAt: number;
+    goal?: { x: number; z: number };
+    path?: { x: number; z: number }[];
+    pathAt?: number;
+  };
 };
 export type Room = {
   code: string;
@@ -73,6 +86,8 @@ export type Room = {
   drops?: WorldDrop[];
   chests?: ChestState[];
   zonePlayers?: number;
+  botCount?: number;
+  busDuration?: number;
   events: GameEvent[];
   marks?: GameEvent[];
 };
@@ -188,7 +203,7 @@ export function createRoom(code: string, member: Member, now: number): Room {
   };
 }
 export function addMember(room: Room, member: Member) {
-  if (room.players.length >= CAPACITY)
+  if (room.players.filter((p) => !p.bot).length >= CAPACITY)
     throw new GameError('This room is full.', 409);
   // Late arrivals reserve a seat for the next round without changing this one.
   if (room.phase !== 'waiting') {
@@ -232,7 +247,8 @@ export function damageMember(
   if (
     teammates(room, attacker, target) ||
     target.health <= 0 ||
-    target.spectator
+    target.spectator ||
+    target.onBus
   )
     return;
   stopRevive(target);
@@ -305,7 +321,7 @@ export function advance(room: Room, now: number) {
     p.healing ??= null;
     p.healUntil ??= 0;
     p.owned ??= p.ammo.map((n, i) => n > 0 || p.reserve[i] > 0);
-    p.connected = now - p.lastSeen < 5000;
+    p.connected = p.bot || now - p.lastSeen < 5000;
     if (p.weapon >= 0 && p.reloadUntil && now >= p.reloadUntil) {
       const r = reloadAmmo(
         p.ammo[p.weapon],
@@ -318,17 +334,22 @@ export function advance(room: Room, now: number) {
     }
   }
   if (room.phase === 'waiting' || room.phase === 'finished') {
-    room.players = room.players.filter((p) => now - p.lastSeen < 60000);
+    room.players = room.players.filter(
+      (p) => p.bot || now - p.lastSeen < 60000,
+    );
     if (!room.players.find((p) => p.id === room.host)?.connected) {
-      const next = room.players.find((p) => p.connected);
+      const next = room.players.find((p) => p.connected && !p.bot);
       if (next) room.host = next.id;
     }
-    const connected = room.players.filter((p) => p.connected);
+    const connected = room.players.filter((p) => p.connected && !p.bot);
     if (
       room.phase === 'finished' &&
-      connected.length >= 2 &&
+      connected.length > 0 &&
+      connected.length + (room.botCount ?? 0) >= 2 &&
       connected.every((p) => p.ready) &&
-      (room.mode !== 'duos' || new Set(connected.map((p) => p.team)).size >= 2)
+      (room.mode !== 'duos' ||
+        (room.botCount ?? 0) > 0 ||
+        new Set(connected.map((p) => p.team)).size >= 2)
     ) {
       room.phase = 'waiting';
       applyCommand(room, room.host, { type: 'start' }, now);
@@ -339,12 +360,22 @@ export function advance(room: Room, now: number) {
   if (room.phase !== 'playing') return;
   const elapsed = Math.max(0, (now - room.startAt) / 1000),
     zone = zoneAt(
-      elapsed,
+      Math.max(0, elapsed - (room.busDuration ?? 0)),
       `${room.code}:${room.round}`,
       room.zonePlayers ?? 16,
     );
   for (const p of room.players) {
     if (p.health <= 0) continue;
+    if (p.bot) p.lastSeen = now;
+    if (p.onBus) {
+      Object.assign(p, busPosition(elapsed));
+      if (elapsed >= (p.ai?.jumpAt ?? room.busDuration ?? BUS_SECONDS)) {
+        p.onBus = false;
+        p.moveAt = now;
+        p.credit = 0;
+      }
+      continue;
+    }
     if (p.downed && now >= (p.bleedOutAt ?? 0)) {
       eliminate(
         room,
@@ -369,13 +400,35 @@ export function advance(room: Room, now: number) {
       }
     }
     if (p.dropping) {
-      p.y = Math.max(1.7, p.y - Math.min(dt, elapsed) * DROP_SPEED);
+      p.y = glideHeight(
+        p.y,
+        Math.min(dt, elapsed),
+        Math.max(
+          0,
+          ((p.launchAt ?? -10000) + LIFT_SECONDS * 1000 - (now - dt * 1000)) /
+            1000,
+        ),
+      );
       if (p.y <= 1.7) {
         p.dropping = false;
         const landing = safeLanding(p.x, p.z);
         p.x = landing.x;
         p.z = landing.z;
       }
+    }
+    if (
+      !p.dropping &&
+      !p.downed &&
+      !p.mantleUntil &&
+      now - (p.launchAt ?? -10000) > 6000 &&
+      padAt(p.x, p.y, p.z) >= 0
+    ) {
+      p.launchAt = now;
+      p.dropping = true;
+      p.crouching = false;
+      p.reloadUntil = 0;
+      cancelRecovery(p);
+      stopRevive(p);
     }
     if (now - p.lastSeen > 20000) {
       eliminate(room, p, now);
@@ -387,6 +440,7 @@ export function advance(room: Room, now: number) {
       if (!p.health) eliminate(room, p, now);
     }
   }
+  if (dt > 0) updateRoomBots(room, now, Math.min(dt, 0.25));
   for (const p of room.players) autoAmmo(room, p, now);
   for (const p of room.players) {
     const item = p.healing;
@@ -489,6 +543,11 @@ function validPose(p: unknown): p is PlayerPose {
 }
 function move(p: Member, pose: PlayerPose, now: number) {
   if (!validPose(pose)) throw new GameError('Invalid movement.');
+  if (p.onBus) {
+    p.yaw = pose.yaw;
+    p.pitch = Math.max(-1.35, Math.min(1.35, pose.pitch));
+    return;
+  }
   p.crouching = pose.crouching === true && !p.dropping && !p.downed;
   p.sprinting = pose.sprinting === true && !p.crouching;
   if (p.mantleUntil && now < p.mantleUntil) {
@@ -607,7 +666,12 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
       if (t !== null && t < nearest) nearest = t;
     }
     for (const other of room.players) {
-      if (other.id === p.id || other.health <= 0 || teammates(room, p, other))
+      if (
+        other.id === p.id ||
+        other.health <= 0 ||
+        other.onBus ||
+        teammates(room, p, other)
+      )
         continue;
       const base = other.y - 1.7;
       const t = rayBox(
@@ -705,12 +769,13 @@ export function applyCommand(
   id: string,
   command: Command,
   now: number,
+  internal = false,
 ) {
   const p = room.players.find((p) => p.id === id);
   if (!p) throw new GameError('Your room session has ended.', 401);
   p.lastSeen = now;
   p.connected = true;
-  advance(room, now);
+  if (!internal) advance(room, now);
   if (command.type === 'leave') {
     if (
       !p.spectator &&
@@ -722,8 +787,19 @@ export function applyCommand(
     p.connected = false;
     if (room.host === id)
       room.host =
-        room.players.find((o) => o.id !== id && o.connected)?.id ?? '';
+        room.players.find((o) => o.id !== id && o.connected && !o.bot)?.id ??
+        '';
     advance(room, now);
+    return;
+  }
+  if (command.type === 'bots') {
+    if (room.host !== id)
+      throw new GameError('Only the host can set bots.', 403);
+    if (room.phase !== 'waiting')
+      throw new GameError('Set bots between rounds.', 409);
+    if (![0, 4, 8].includes(command.count))
+      throw new GameError('Choose 0, 4, or 8 bots.');
+    room.botCount = command.count;
     return;
   }
   if (command.type === 'mode' || command.type === 'team') {
@@ -752,14 +828,40 @@ export function applyCommand(
       throw new GameError('Only the host can start the match.', 403);
     if (room.phase !== 'waiting')
       throw new GameError('The match is already running.', 409);
-    const connected = room.players.filter((o) => o.connected);
-    if (connected.length < 2)
+    const connected = room.players.filter((o) => o.connected && !o.bot);
+    if (connected.length + (room.botCount ?? 0) < 2)
       throw new GameError('At least two connected players are needed.');
-    if (room.mode === 'duos' && new Set(connected.map((q) => q.team)).size < 2)
+    if (
+      room.mode === 'duos' &&
+      !(room.botCount ?? 0) &&
+      new Set(connected.map((q) => q.team)).size < 2
+    )
       throw new GameError(
         'Duos needs at least two teams. Choose different teams or invite more friends.',
       );
-    room.players = connected;
+    room.players = [...connected];
+    for (let i = 0; i < (room.botCount ?? 0); i++) {
+      const bot = createMember(
+        `bot-${i}`,
+        [
+          'Dune',
+          'Pebble',
+          'Bucket',
+          'Sprout',
+          'Scoop',
+          'Rivet',
+          'Marble',
+          'Drift',
+        ][i] + ' · BOT',
+        'bot:no-login',
+        now,
+      );
+      bot.bot = true;
+      // Bots form their own duos; human team choices stay intact.
+      bot.team = 4 + Math.floor(i / 2);
+      room.players.push(bot);
+    }
+    room.busDuration = BUS_SECONDS;
     room.phase = 'countdown';
     room.round++;
     room.startAt = now + 5000;
@@ -773,26 +875,18 @@ export function applyCommand(
     room.events = [];
     room.marks = [];
     room.players.forEach((member, i) => {
-      const team = member.team;
+      const team = member.team,
+        bot = member.bot;
       Object.assign(member, {
         ...createMember(member.id, member.name, member.tokenHash, now),
         team,
-        ...safeSpawn(
-          room.mode === 'duos'
-            ? [...new Set(connected.map((q) => q.team))].indexOf(team)
-            : i,
-          room.mode === 'duos'
-            ? new Set(connected.map((q) => q.team)).size
-            : room.players.length,
-        ),
-        y: DROP_HEIGHT,
+        ...busPosition(0),
         dropping: true,
+        onBus: true,
+        bot,
+        launchAt: -10000,
+        ai: bot ? { thinkAt: 0, jumpAt: 2 + ((i * 2.13) % 14) } : undefined,
       });
-      if (
-        room.mode === 'duos' &&
-        connected.findIndex((q) => q.team === team) !== i
-      )
-        member.x += 2;
       member.yaw = Math.atan2(member.x, member.z);
     });
     return;
@@ -800,11 +894,14 @@ export function applyCommand(
   if (command.type === 'ready') {
     if (room.phase !== 'finished') return;
     p.ready = !p.ready;
-    const connected = room.players.filter((q) => q.connected);
+    const connected = room.players.filter((q) => q.connected && !q.bot);
     if (
-      connected.length >= 2 &&
+      connected.length > 0 &&
+      connected.length + (room.botCount ?? 0) >= 2 &&
       connected.every((q) => q.ready) &&
-      (room.mode !== 'duos' || new Set(connected.map((q) => q.team)).size >= 2)
+      (room.mode !== 'duos' ||
+        (room.botCount ?? 0) > 0 ||
+        new Set(connected.map((q) => q.team)).size >= 2)
     ) {
       room.phase = 'waiting';
       applyCommand(room, room.host, { type: 'start' }, now);
@@ -817,11 +914,20 @@ export function applyCommand(
     if (room.phase !== 'finished')
       throw new GameError('Wait for this match to finish.', 409);
     room.phase = 'waiting';
+    room.players = room.players.filter((p) => !p.bot);
     room.winner = null;
     return;
   }
   if (command.type === 'ping') return;
   if (room.phase !== 'playing' || p.health <= 0) return;
+  if (command.type === 'jumpBus' && p.onBus) {
+    Object.assign(p, busPosition((now - room.startAt) / 1000));
+    p.onBus = false;
+    p.moveAt = now;
+    p.credit = 0;
+    return;
+  }
+  if (p.onBus && command.type !== 'pose' && command.type !== 'mark') return;
   if (command.type === 'mark') {
     if (now - (p.lastMark ?? 0) < 1000) return;
     if (
@@ -982,17 +1088,19 @@ export function applyCommand(
     else drop.used = true;
     event(room, { type: 'pickup', player: p.id, at: now });
   }
-  advance(room, now);
+  if (!internal) advance(room, now);
 }
 export function snapshot(room: Room, now: number): RoomSnapshot {
   const zone = zoneAt(
-    Math.max(0, (now - room.startAt) / 1000),
+    Math.max(0, (now - room.startAt) / 1000 - (room.busDuration ?? 0)),
     `${room.code}:${room.round}`,
     room.zonePlayers ?? 16,
   );
   return {
     code: room.code,
     host: room.host,
+    botCount: room.botCount ?? 0,
+    busDuration: room.busDuration ?? 0,
     mode: room.mode ?? 'solo',
     winningTeam: room.winningTeam ?? null,
     phase: room.phase,
@@ -1011,6 +1119,7 @@ export function snapshot(room: Room, now: number): RoomSnapshot {
         lastCommand: _lastCommand,
         commandError: _commandError,
         lastMark: _lastMark,
+        ai: _ai,
         ...p
       }) => p,
     ),
@@ -1035,11 +1144,14 @@ export function parseCommand(value: unknown): Command {
       'start',
       'rematch',
       'ready',
+      'jumpBus',
       'cancelHeal',
       'cancelRevive',
     ].includes(c.type)
   )
     return { type: c.type } as Command;
+  if (c.type === 'bots' && [0, 4, 8].includes(c.count))
+    return { type: 'bots', count: c.count };
   if (c.type === 'mode' && (c.mode === 'solo' || c.mode === 'duos'))
     return { type: 'mode', mode: c.mode };
   if (
