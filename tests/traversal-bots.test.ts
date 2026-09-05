@@ -55,10 +55,10 @@ void test('bus riders share the route, choose separate jumps, cannot teleport or
   assert.equal(a.onBus, false);
   assert.equal(b.onBus, true);
   tick(r, at + 8000);
-  assert.equal(a.y, 59);
+  assert.ok(Math.abs(a.y - 59) < 1e-8);
   assert.equal(b.y, 65);
   applyCommand(r, a.id, { type: 'jumpBus' }, at + 8000);
-  assert.equal(a.y, 59);
+  assert.ok(Math.abs(a.y - 59) < 1e-8);
   tick(r, at + 5000 + BUS_SECONDS * 1000);
   assert.equal(b.onBus, false);
   assert.equal(b.y, 65);
@@ -229,4 +229,87 @@ void test('solo jump leaves the bus and preserves the selected position and empt
   assert.deepEqual(g.position.toArray(), [10, 65, 20]);
   assert.equal(g.state.dropping, true);
   assert.ok(!g.state.owned.some(Boolean));
+});
+
+void test('gliding covers twice the horizontal ground and server movement accepts the same speed', () => {
+  const r = room(),
+    a = r.players[0];
+  tick(r, at + 6000);
+  applyCommand(r, a.id, { type: 'jumpBus' }, at + 6000);
+  const x = a.x;
+  for (let i = 1; i <= 10; i++)
+    applyCommand(
+      r,
+      a.id,
+      { type: 'pose', pose: { ...a, x: x + i * 2 } },
+      at + 6000 + i * 100,
+    );
+  assert.ok(Math.abs(a.x - x - 20) < 1e-7);
+  assert.ok(Math.abs(a.y - 59) < 1e-8);
+  const accepted = a.x;
+  applyCommand(
+    r,
+    a.id,
+    { type: 'pose', pose: { ...a, x: a.x + 12 } },
+    at + 7101,
+  );
+  assert.equal(a.x, accepted, 'gliding still rejects forged teleports');
+});
+void test('pad descent permits aimed shots and reloads while the bus drop and launch ascent remain blocked', () => {
+  const r = room(),
+    [a, b] = r.players;
+  tick(r, at + 6000);
+  Object.assign(a, {
+    x: 0,
+    z: 130,
+    y: 20,
+    onBus: false,
+    dropping: true,
+    owned: [true, false, false],
+    weapon: 0,
+    ammo: [30, 0, 0],
+    reserve: [90, 0, 0],
+    yaw: 0,
+    pitch: 0,
+  });
+  Object.assign(b, { x: 0, z: 120, y: 20, onBus: false, dropping: true });
+  applyCommand(
+    r,
+    a.id,
+    { type: 'shoot', pose: { ...a }, aiming: true },
+    at + 6000,
+  );
+  assert.equal(
+    a.ammo[0],
+    30,
+    'opening bus drop cannot shoot even with a forged loadout',
+  );
+  a.launchAt = at + 6000;
+  applyCommand(
+    r,
+    a.id,
+    { type: 'shoot', pose: { ...a }, aiming: true },
+    at + 6100,
+  );
+  assert.equal(a.ammo[0], 30, 'pad ascent cannot shoot');
+  tick(r, at + 7000);
+  Object.assign(b, { x: a.x, z: a.z - 10, y: a.y, launchAt: a.launchAt });
+  applyCommand(
+    r,
+    a.id,
+    { type: 'shoot', pose: { ...a }, aiming: true },
+    at + 7000,
+  );
+  assert.equal(a.ammo[0], 29);
+  assert.ok(b.shield < 50, 'airborne shot damages the target');
+  applyCommand(r, a.id, { type: 'reload' }, at + 7100);
+  assert.ok(a.reloadUntil > at + 7100);
+  a.medkits = 1;
+  a.health = 50;
+  applyCommand(r, a.id, { type: 'heal', item: 'medkit' }, at + 7200);
+  assert.equal(
+    a.healing,
+    null,
+    'airborne combat does not unlock ground-only interactions',
+  );
 });

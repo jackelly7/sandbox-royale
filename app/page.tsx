@@ -1080,7 +1080,11 @@ export default function Home() {
                     ? 'Use the left stick to steer toward loot'
                     : 'W A S D to steer · Move mouse to look for loot'}
                 </p>
-                <small>Steer toward cover, chests, and supplies.</small>
+                <small>
+                  {state.padGliding
+                    ? 'Weapons ready · Aim, shoot, and reload while gliding.'
+                    : 'Steer toward cover, chests, and supplies.'}
+                </small>
               </div>
             </>
           )}

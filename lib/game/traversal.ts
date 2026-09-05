@@ -20,6 +20,8 @@ export const LAUNCH_PADS = [
   [5, 62],
   [4, -8],
 ].map(([x, z]) => ({ x: x * ARENA_SCALE, z: z * ARENA_SCALE }));
+// Twice the old horizontal reach, with the same descent and landing timing.
+export const GLIDE_SPEED = 20;
 export const LIFT_SECONDS = 0.85;
 export const LIFT_SPEED = 34;
 export function padAt(x: number, y: number, z: number) {
@@ -30,4 +32,19 @@ export function padAt(x: number, y: number, z: number) {
 export function glideHeight(y: number, dt: number, liftRemaining = 0) {
   const lift = Math.min(dt, Math.max(0, liftRemaining));
   return Math.max(1.7, y + lift * LIFT_SPEED - (dt - lift) * 6);
+}
+
+export function canGlideFire(
+  dropping: boolean,
+  onBus: boolean,
+  launchAt: number | undefined,
+  now: number,
+) {
+  return (
+    dropping &&
+    !onBus &&
+    launchAt !== undefined &&
+    launchAt >= 0 &&
+    now >= launchAt + LIFT_SECONDS * 1000
+  );
 }

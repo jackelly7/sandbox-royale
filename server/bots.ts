@@ -1,3 +1,4 @@
+import { GLIDE_SPEED } from '../lib/game/traversal.ts';
 import { MAP } from '../lib/game/map-data.ts';
 import { ARENA_RADIUS } from '../lib/game/arena.ts';
 import { CHEST_SPOTS, canReach } from '../lib/game/chests.ts';
@@ -259,7 +260,10 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
       ai.path?.shift();
       continue;
     }
-    const step = Math.min(distance, dt * (p.dropping ? 9 : p.healing ? 5 : 9));
+    const step = Math.min(
+      distance,
+      dt * (p.dropping ? GLIDE_SPEED * 0.85 : p.healing ? 5 : 9),
+    );
     const x = p.x + ((goal.x - p.x) / distance) * step,
       z = p.z + ((goal.z - p.z) / distance) * step;
     if (p.dropping || segment(p, { x, z })) {

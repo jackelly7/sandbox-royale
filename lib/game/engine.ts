@@ -1,5 +1,7 @@
 import {
   BUS_SECONDS,
+  GLIDE_SPEED,
+  canGlideFire,
   busPosition,
   padAt,
   glideHeight,
@@ -140,6 +142,7 @@ export type GameState = RecoveryState & {
   healRemaining: number;
   dropping: boolean;
   onBus?: boolean;
+  padGliding?: boolean;
   busRemaining?: number;
   mapOpen?: boolean;
   squadPoints?: { x: number; z: number; name: string }[];
@@ -1134,6 +1137,20 @@ export class BattleGame {
     this.gun.add(this.flash);
     this.gun.visible = false;
   }
+  canUseAirWeapon() {
+    const me = this.networkRoom?.players.find(
+      (p) => p.id === this.network?.playerId,
+    );
+    return canGlideFire(
+      this.state.dropping,
+      !!this.state.onBus,
+      this.network ? me?.launchAt : this.launchAt * 1000,
+      this.network ? (this.networkRoom?.now ?? 0) : this.time * 1000,
+    );
+  }
+  canUseWeapon() {
+    return !this.state.dropping || this.canUseAirWeapon();
+  }
   showWeapon() {
     const index = this.state.weapon;
     this.gun.visible =
@@ -1144,7 +1161,8 @@ export class BattleGame {
       !this.thirdPerson() &&
       !this.isPunching() &&
       !(this.aiming && index === 2) &&
-      !this.isDowned();
+      !this.isDowned() &&
+      this.canUseWeapon();
     this.gunModels?.forEach((model, i) => {
       const tier = this.state.tiers?.[i] ?? 0;
       if (model.userData.rarity !== tier) {
@@ -1603,7 +1621,7 @@ export class BattleGame {
           this.avatar.add(held);
         }
         if (held) {
-          held.visible = index >= 0 && !this.isDowned() && !this.state.dropping;
+          held.visible = index >= 0 && !this.isDowned() && this.canUseWeapon();
           const reload =
             this.reloadTimer > 0 && index >= 0
               ? 1 - this.reloadTimer / WEAPONS[index].reload
@@ -1683,7 +1701,7 @@ export class BattleGame {
       !this.state.healing &&
       !this.state.reloading &&
       !this.isPunching() &&
-      !this.state.dropping &&
+      this.canUseWeapon() &&
       !this.isDowned();
     this.showWeapon();
     this.emit();
@@ -1869,6 +1887,7 @@ export class BattleGame {
     this.emit();
   }
   reload() {
+    if (!this.canUseWeapon()) return;
     if (this.state.weapon < 0 || !this.state.owned[this.state.weapon]) return;
     const i = this.state.weapon,
       w = WEAPONS[i];
@@ -2153,7 +2172,7 @@ export class BattleGame {
   }
   shoot() {
     if (
-      this.state.dropping ||
+      !this.canUseWeapon() ||
       this.mantle ||
       this.state.phase !== 'playing' ||
       this.isDowned()
@@ -2647,7 +2666,7 @@ export class BattleGame {
           if (nearest) {
             const delta = nearest.mesh.position.clone().sub(p);
             delta.y = 0;
-            delta.clampLength(0, 5 * dt);
+            delta.clampLength(0, GLIDE_SPEED * 0.75 * dt);
             p.add(delta);
           }
         }
@@ -2769,8 +2788,8 @@ export class BattleGame {
       }
       const opponent = b.target === -1 ? null : this.bots[b.target ?? -1];
       const target =
-        b.target === -1 && this.state.health > 0 && !this.state.dropping
-          ? this.position.clone().setY(1.3)
+        b.target === -1 && this.state.health > 0 && this.canUseWeapon()
+          ? this.position.clone().add(new THREE.Vector3(0, -0.4, 0))
           : opponent && opponent.hp > 0 && !opponent.dropping
             ? opponent.mesh.position.clone().add(new THREE.Vector3(0, 1.3, 0))
             : null;
@@ -2858,8 +2877,11 @@ export class BattleGame {
           ]
         : [],
     );
-    if (this.state.health > 0 && !this.state.dropping)
-      candidates.push({ id: -1, point: this.position.clone().setY(1.3) });
+    if (this.state.health > 0 && this.canUseWeapon())
+      candidates.push({
+        id: -1,
+        point: this.position.clone().add(new THREE.Vector3(0, -0.4, 0)),
+      });
     candidates.sort(
       (a, b) => p.distanceToSquared(a.point) - p.distanceToSquared(b.point),
     );
@@ -3012,7 +3034,7 @@ export class BattleGame {
         this.network && this.networkRoom?.phase !== 'playing'
           ? 0
           : this.state.dropping
-            ? 10
+            ? GLIDE_SPEED
             : this.isDowned()
               ? 2
               : this.state.crouching
@@ -3020,7 +3042,13 @@ export class BattleGame {
                 : this.state.sprinting
                   ? MOVE.sprint
                   : MOVE.run;
-      const pace = this.state.healing ? 0.7 : this.aiming ? 0.7 : 1;
+      const pace = this.state.dropping
+        ? 1
+        : this.state.healing
+          ? 0.7
+          : this.aiming
+            ? 0.7
+            : 1;
       this.motion.x = smoothVelocity(
         this.motion.x,
         (mx * Math.cos(this.yaw) - mz * Math.sin(this.yaw)) * speed * pace,
@@ -3105,6 +3133,11 @@ export class BattleGame {
         this.setAiming(false);
         this.notice('Launched! Steer toward your next landing.');
         this.sound(420, 0.3, 0.05, 'sine');
+      }
+      const padGliding = this.canUseAirWeapon();
+      if (padGliding !== !!this.state.padGliding) {
+        this.state.padGliding = padGliding;
+        this.showWeapon();
       }
       this.state.mantling = !!this.mantle;
       this.state.altitude = Math.max(0, this.position.y - 1.7);

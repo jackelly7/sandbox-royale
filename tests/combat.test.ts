@@ -671,3 +671,37 @@ void test('expanded island permits movement beyond the old rim and resets loot a
     positions,
   );
 });
+
+void test('solo launch-pad descent restores gun visibility, aiming, shots, and reloading in both views', () => {
+  const game = arena();
+  game.state.weapon = 0;
+  game.state.dropping = true;
+  game.state.onBus = false;
+  game.launchAt = 0;
+  game.time = 0.3;
+  game.showWeapon();
+  assert.equal(game.gun.visible, false);
+  game.shoot();
+  assert.equal(game.weaponAmmo[0], 30);
+  game.time = 1;
+  game.showWeapon();
+  assert.equal(game.gun.visible, true);
+  game.setAiming(true);
+  assert.equal(game.aiming, true);
+  game.shoot();
+  assert.equal(game.weaponAmmo[0], 29);
+  game.reload();
+  assert.ok(game.reloadTimer > 0);
+  game.perspective = 'third';
+  game.updatePlayerCamera();
+  assert.ok(game.avatar?.getObjectByName('Player weapon')?.visible);
+  game.launchAt = -100;
+  game.reloadTimer = 0;
+  game.state.reloading = false;
+  game.setAiming(true);
+  assert.equal(game.aiming, false, 'opening drop has no aerial weapon access');
+  game.cooldown = 0;
+  game.shoot();
+  assert.equal(game.weaponAmmo[0], 29);
+  game.disposeObject(game.scene);
+});

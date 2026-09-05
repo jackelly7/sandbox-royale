@@ -1,6 +1,8 @@
 import { updateRoomBots } from './bots.ts';
 import {
   BUS_SECONDS,
+  GLIDE_SPEED,
+  canGlideFire,
   busPosition,
   padAt,
   glideHeight,
@@ -564,7 +566,7 @@ function move(p: Member, pose: PlayerPose, now: number) {
         (p.downed
           ? 2
           : p.dropping
-            ? 10
+            ? GLIDE_SPEED
             : p.crouching
               ? MOVE.crouch + 0.2
               : p.sprinting
@@ -957,7 +959,15 @@ export function applyCommand(
     if (command.type === 'pose') move(p, command.pose, now);
     return;
   }
-  if (p.dropping && command.type !== 'pose') return;
+  if (
+    p.dropping &&
+    command.type !== 'pose' &&
+    !(
+      canGlideFire(p.dropping, !!p.onBus, p.launchAt, now) &&
+      ['shoot', 'reload'].includes(command.type)
+    )
+  )
+    return;
   if (command.type === 'mantle') {
     if (p.mantleUntil && now < p.mantleUntil) return;
     move(p, command.pose, now);
