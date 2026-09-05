@@ -95,7 +95,9 @@ try {
     await post(`/rooms/${code}/join`, { name: 'Red Two' }),
   );
   host.send({ type: 'mode', mode: 'duos' });
-  await host.until((r) => r.mode === 'duos');
+  await Promise.all(
+    [host, b, c, d].map((client) => client.until((r) => r.mode === 'duos')),
+  );
   assert.equal(mine(host).team, mine(c).team);
   await b.until((r) => r.mode === 'duos');
   assert.equal(mine(b).team, mine(d).team);
