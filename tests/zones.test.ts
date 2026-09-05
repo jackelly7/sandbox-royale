@@ -53,7 +53,7 @@ void test('zone holds, closes continuously, and announces the exact next destina
     assert.equal(end.x, hold.next.x);
     assert.equal(end.z, hold.next.z);
   }
-  assert.equal(at, 335);
+  assert.equal(at, 285);
   assert.equal(zoneAt(900).stage, 'final');
   assert.equal(zoneAt(900).radius, 5);
 });
@@ -76,14 +76,14 @@ void test('multiplayer damage and snapshots use the same moving center', () => {
   assert.deepEqual(snapshot(room, now).zone, zone);
 });
 
-void test('small friend matches get the full map and five-and-a-half-minute circle schedule', () => {
+void test('small friend matches get the full map and faster opening circle schedule', () => {
   for (const players of [2, 4, 8, 16]) {
     assert.equal(zoneAt(0, 'sandbox', players).radius, INITIAL_CIRCLE);
-    assert.equal(zoneAt(54, 'sandbox', players).stage, 'waiting');
-    assert.equal(zoneAt(55, 'sandbox', players).stage, 'closing');
-    assert.equal(zoneAt(100, 'sandbox', players).radius, 135);
-    assert.ok(zoneAt(122, 'sandbox', players).radius > 100);
-    assert.equal(zoneAt(334, 'sandbox', players).stage, 'closing');
-    assert.equal(zoneAt(335, 'sandbox', players).stage, 'final');
+    assert.equal(zoneAt(39, 'sandbox', players).stage, 'waiting');
+    assert.equal(zoneAt(40, 'sandbox', players).stage, 'closing');
+    assert.equal(zoneAt(70, 'sandbox', players).radius, 135);
+    assert.ok(zoneAt(110, 'sandbox', players).radius > 100);
+    assert.equal(zoneAt(284, 'sandbox', players).stage, 'closing');
+    assert.equal(zoneAt(285, 'sandbox', players).stage, 'final');
   }
 });

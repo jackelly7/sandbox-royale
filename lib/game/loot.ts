@@ -8,13 +8,27 @@ export type WorldDrop = {
   amount?: number;
   used: boolean;
 };
+export const AMMO_TYPES = [
+  { name: 'Rifle ammo', color: '#e7cb72' },
+  { name: 'Shotgun shells', color: '#f07d64' },
+  { name: 'Sniper ammo', color: '#8fd6df' },
+];
+export const isAmmo = (kind: number) => kind >= 5 && kind <= 7;
 export function floorAvailable(index: number) {
-  if (index < 19) return true;
-  if (index < 43) return (index - 19) % 3 === Math.floor((index - 19) / 3) % 3;
-  const sector = Math.floor((index - 43) / 2);
-  return (
-    index < 59 && sector % 2 === 0 && (index - 43) % 2 === (sector / 2) % 2
-  );
+  return index < 15 || index === 16;
+}
+export function ammoBeside(
+  gun: { x: number; z: number; kind: number },
+  amount = WEAPONS[gun.kind].capacity * 3,
+): WorldDrop {
+  return {
+    x: gun.x + 1.3,
+    z: gun.z,
+    kind: gun.kind + 5,
+    rarity: 0,
+    amount,
+    used: false,
+  };
 }
 export function floorRarity(index: number) {
   if (index === 12) return 3;
@@ -22,6 +36,7 @@ export function floorRarity(index: number) {
   return roll < 60 ? 0 : roll < 85 ? 1 : roll < 97 ? 2 : 3;
 }
 export function lootColor(kind: number, rarity = 0) {
+  if (isAmmo(kind)) return AMMO_TYPES[kind - 5].color;
   return kind < 3 ? RARITIES[rarity].color : kind === 3 ? '#78dfee' : '#ff7474';
 }
 type Inventory = {
@@ -40,26 +55,42 @@ export function eliminationDrops(
 ): WorldDrop[] {
   const drops: WorldDrop[] = [];
   inv.owned.forEach((has, kind) => {
+    const p = {
+      x: x + Math.cos(kind * 2.4) * 1.4,
+      z: z + Math.sin(kind * 2.4) * 1.4,
+      kind,
+    };
     if (has)
       drops.push({
-        x,
-        z,
-        kind,
+        ...p,
         rarity: inv.tiers?.[kind] ?? 0,
-        ammo: inv.ammo[kind] + inv.reserve[kind],
+        ammo: 0,
         used: false,
       });
+    const amount = inv.ammo[kind] + inv.reserve[kind];
+    if (amount > 0) drops.push(ammoBeside(p, amount));
   });
   if (inv.cells)
-    drops.push({ x, z, kind: 3, rarity: 0, amount: inv.cells, used: false });
+    drops.push({
+      x: x - 1.5,
+      z: z + 2,
+      kind: 3,
+      rarity: 0,
+      amount: inv.cells,
+      used: false,
+    });
   if (inv.medkits)
-    drops.push({ x, z, kind: 4, rarity: 0, amount: inv.medkits, used: false });
-  return drops.map((d, i) => ({
-    ...d,
-    x: x + Math.cos(i * 2.4) * 1.3,
-    z: z + Math.sin(i * 2.4) * 1.3,
-  }));
+    drops.push({
+      x: x + 1.5,
+      z: z + 2,
+      kind: 4,
+      rarity: 0,
+      amount: inv.medkits,
+      used: false,
+    });
+  return drops;
 }
+
 export function collectGun(
   inv: Inventory,
   drop: Pick<WorldDrop, 'kind' | 'rarity' | 'ammo'>,
@@ -67,15 +98,38 @@ export function collectGun(
   const k = drop.kind,
     first = !inv.owned[k];
   inv.tiers ??= [0, 0, 0];
+  const swapped = first ? null : inv.tiers[k];
   const upgrade = !first && drop.rarity > inv.tiers[k];
-  inv.tiers[k] = first ? drop.rarity : Math.max(inv.tiers[k], drop.rarity);
+  inv.tiers[k] = drop.rarity;
   inv.owned[k] = true;
-  let ammo = drop.ammo ?? WEAPONS[k].capacity * 3;
-  if (first) {
-    inv.ammo[k] = Math.min(ammo, WEAPONS[k].capacity);
-    ammo -= inv.ammo[k];
+  inv.weapon = k;
+  // Ammo belongs to the player, never to the picked-up weapon.
+  if (first && inv.ammo[k] === 0) {
+    const loaded = Math.min(WEAPONS[k].capacity, inv.reserve[k]);
+    inv.ammo[k] = loaded;
+    inv.reserve[k] -= loaded;
   }
-  inv.reserve[k] = Math.min(WEAPONS[k].capacity * 8, inv.reserve[k] + ammo);
-  if (first || upgrade) inv.weapon = k;
-  return { first, upgrade };
+  return { first, upgrade, swapped };
+}
+export function collectAmmo(
+  inv: Pick<Inventory, 'owned' | 'ammo' | 'reserve'>,
+  drop: WorldDrop,
+  loadEmpty = true,
+) {
+  if (!isAmmo(drop.kind) || drop.used) return 0;
+  const k = drop.kind - 5,
+    capacity = WEAPONS[k].capacity;
+  const taken = Math.min(
+    drop.amount ?? 0,
+    Math.max(0, capacity * 8 - inv.reserve[k]),
+  );
+  inv.reserve[k] += taken;
+  drop.amount = (drop.amount ?? 0) - taken;
+  drop.used = drop.amount <= 0;
+  if (taken && loadEmpty && inv.owned[k] && inv.ammo[k] === 0) {
+    const loaded = Math.min(capacity, inv.reserve[k]);
+    inv.ammo[k] = loaded;
+    inv.reserve[k] -= loaded;
+  }
+  return taken;
 }

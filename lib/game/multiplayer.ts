@@ -23,6 +23,7 @@ export type Player = PlayerPose &
     rank: number;
     connected: boolean;
     ready?: boolean;
+    pickedUpAt?: number;
     dropping: boolean;
     killedBy: string | null;
     diedAt: number;
@@ -81,6 +82,7 @@ export type GameEvent = {
   end?: [number, number, number];
   at: number;
   amount?: number;
+  ammoKind?: number;
   shieldDamage?: number;
   shieldBreak?: boolean;
   headshot?: boolean;

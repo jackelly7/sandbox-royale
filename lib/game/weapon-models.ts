@@ -10,7 +10,11 @@ function buildWeaponModel(
   rarity = 0,
 ) {
   const k = modelKit(WEAPONS[index].short),
-    { box, tube } = k;
+    { tube } = k;
+  const box = (...args: Parameters<typeof k.box>) => {
+    if (detail === 'world' && args[7] && args[7] <= 0.03) args[7] = 0;
+    return k.box(...args);
+  };
   const dark = detail === 'world' ? RARITIES[rarity].color : '#263239',
     edge = '#50636b',
     black = '#142026',

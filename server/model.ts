@@ -2,6 +2,7 @@ import {
   CHEST_SPOTS,
   chestLayout,
   chestDrops,
+  floorAmmo,
   canReach,
   type ChestState,
 } from '../lib/game/chests.ts';
@@ -11,6 +12,8 @@ import {
   floorAvailable,
   floorRarity,
   collectGun,
+  collectAmmo,
+  isAmmo,
   eliminationDrops,
   type WorldDrop,
 } from '../lib/game/loot.ts';
@@ -138,6 +141,7 @@ export function createMember(
     rank: 0,
     connected: true,
     ready: false,
+    pickedUpAt: 0,
     dropping: false,
     killedBy: null,
     diedAt: 0,
@@ -383,6 +387,7 @@ export function advance(room: Room, now: number) {
       if (!p.health) eliminate(room, p, now);
     }
   }
+  for (const p of room.players) autoAmmo(room, p, now);
   for (const p of room.players) {
     const item = p.healing;
     if (completeRecovery(p, now) && item)
@@ -429,6 +434,34 @@ export function advance(room: Room, now: number) {
         (room.mode === 'duos' && !p.spectator && p.team === room.winningTeam)
       )
         p.rank = 1;
+  }
+}
+export function autoAmmo(room: Room, p: Member, now: number) {
+  if (
+    room.phase !== 'playing' ||
+    p.health <= 0 ||
+    p.spectator ||
+    p.downed ||
+    p.dropping ||
+    (p.mantleUntil ?? 0) > now
+  )
+    return;
+  for (const drop of room.drops ?? []) {
+    if (
+      !isAmmo(drop.kind) ||
+      drop.used ||
+      !canReach(p, { x: drop.x, y: 0.65, z: drop.z }, MAP.colliders, 2.5)
+    )
+      continue;
+    const amount = collectAmmo(p, drop, !p.reloadUntil);
+    if (amount)
+      event(room, {
+        type: 'pickup',
+        player: p.id,
+        at: now,
+        amount,
+        ammoKind: drop.kind - 5,
+      });
   }
 }
 export function safeLanding(x: number, z: number) {
@@ -734,7 +767,7 @@ export function applyCommand(
     room.winner = null;
     room.winningTeam = null;
     room.loot = MAP.loot.map((_, i) => !floorAvailable(i));
-    room.drops = [];
+    room.drops = floorAmmo().map((d) => ({ ...d, ...safeLanding(d.x, d.z) }));
     room.chests = chestLayout(`${room.code}:${room.round}`);
     room.zonePlayers = connected.length;
     room.events = [];
@@ -902,6 +935,7 @@ export function applyCommand(
       : room.drops?.[command.index - MAP.loot.length];
     if (
       !l ||
+      isAmmo(l.kind) ||
       (floor ? room.loot[command.index] : (l as WorldDrop).used) ||
       !canReach(p, { x: l.x, y: 0.85, z: l.z }, MAP.colliders)
     )
@@ -910,11 +944,30 @@ export function applyCommand(
       ? { ...l, rarity: floorRarity(command.index), used: false }
       : (l as WorldDrop);
     if (l.kind < 3) {
-      const { first, upgrade } = collectGun(p, drop);
-      if (first || upgrade) {
-        cancelRecovery(p);
-        p.reloadUntil = 0;
+      const { swapped } = collectGun(p, drop);
+      p.pickedUpAt = now;
+      if (swapped !== null) {
+        if (!floor) {
+          drop.rarity = swapped;
+          drop.ammo = 0;
+          cancelRecovery(p);
+          p.reloadUntil = 0;
+          event(room, { type: 'pickup', player: p.id, at: now });
+          advance(room, now);
+          return;
+        }
+        room.drops ??= [];
+        room.drops.push({
+          x: l.x,
+          z: l.z,
+          kind: l.kind,
+          rarity: swapped,
+          ammo: 0,
+          used: false,
+        });
       }
+      cancelRecovery(p);
+      p.reloadUntil = 0;
     } else {
       const slot = l.kind === 3 ? 'cells' : 'medkits';
       if (p[slot] >= SUPPLY_LIMIT) return;

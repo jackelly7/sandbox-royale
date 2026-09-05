@@ -746,7 +746,7 @@ export default function Home() {
             )}
           {playing && (
             <div
-              className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : state.weapon === 2 ? 'sniper-hip' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
+              className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : state.weapon === 2 ? 'sniper-hip' : state.weapon === 0 ? 'rifle-hip' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
             >
               <span />
               <span />
@@ -1554,7 +1554,8 @@ export default function Home() {
               <div className="help-note">
                 <Shield size={21} />
                 <p>
-                  Steer toward glowing loot or treasure chests using WASD. You
+                  Steer toward glowing loot or treasure chests using WASD. Walk
+                  over ammo to collect it. Press E to collect or swap a gun. You
                   land unarmed. Find an AR, shotgun, or sniper at a glowing drop
                   and press E to collect it. Use 1–3 or the scroll wheel to
                   switch between weapons you have collected. Common weapons are

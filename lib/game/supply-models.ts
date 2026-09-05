@@ -1,9 +1,20 @@
+import { AMMO_TYPES } from './loot.ts';
 import * as THREE from 'three';
 import { modelKit } from './model-kit.ts';
 function buildSupplyModel(kind: number) {
   const k = modelKit(kind === 3 ? 'Shield cell' : 'Medkit'),
     { box, tube } = k;
-  if (kind === 3) {
+  if (kind >= 5) {
+    const t = kind - 5,
+      color = AMMO_TYPES[t].color;
+    box(0.55, 0.23, 0.4, '#38434b', 0, 0, 0);
+    box(0.57, 0.05, 0.42, color, 0, -0.1, 0);
+    // Different cartridge lengths and shell colors identify the three ammo types.
+    for (const x of [-0.13, 0.13]) {
+      const h = t === 1 ? 0.2 : t === 2 ? 0.42 : 0.3;
+      box(0.09, h, 0.12, color, x, h / 2 + 0.08, 0);
+    }
+  } else if (kind === 3) {
     const shell = k.add(
       new THREE.CylinderGeometry(0.25, 0.3, 0.62, 8),
       '#549bad',

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 export const FEEL = [
-  { kick: 0.065, view: 0.009, cycle: 0.14 },
+  { kick: 0.075, view: 0.011, cycle: 0.2 },
   { kick: 0.14, view: 0.025, cycle: 0.8 },
   { kick: 0.11, view: 0.018, cycle: 1.2 },
 ];

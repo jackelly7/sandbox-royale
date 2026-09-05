@@ -1,29 +1,42 @@
 import { ARENA_SCALE } from './arena.ts';
 import { MAP } from './map-data.ts';
-import type { WorldDrop } from './loot.ts';
+import { ammoBeside, floorAvailable, type WorldDrop } from './loot.ts';
 import type { Bounds, Point } from './movement.ts';
 export type ChestState = { active: boolean; openedAt: number };
-export const CHEST_SPOTS = [
-  { x: 18 * ARENA_SCALE, z: -23 * ARENA_SCALE },
-  { x: -22 * ARENA_SCALE, z: -16 * ARENA_SCALE },
-  ...[21, 24, 27, 30, 33, 36, 39, 42, 14, 18].map((i) => ({
-    x: MAP.loot[i].x,
-    z: MAP.loot[i].z,
-  })),
+export const SHELTERS = [
+  { x: 30, z: 20, w: 12, d: 10 },
+  { x: -35, z: 28, w: 12, d: 10 },
+  { x: 2, z: -57, w: 12, d: 9 },
+  { x: -18, z: 49, w: 10, d: 8 },
 ];
+export const CHEST_SPOTS = [
+  ...[{ x: 18, z: -23 }, { x: -22, z: -16 }, ...SHELTERS].map((p) => ({
+    x: p.x * ARENA_SCALE,
+    z: p.z * ARENA_SCALE,
+  })),
+  ...[21, 24, 27, 30, 33, 36, 39, 42, 15, 17, 18, 43, 45, 47, 49, 51, 53, 55].map(
+    (i) => ({ x: MAP.loot[i].x, z: MAP.loot[i].z }),
+  ),
+];
+export function floorAmmo(): WorldDrop[] {
+  return MAP.loot.flatMap((l, i) =>
+    l.kind < 3 && floorAvailable(i) ? [ammoBeside(l)] : [],
+  );
+}
+
 function hash(seed: string) {
   let n = 2166136261;
   for (const c of seed) n = Math.imul(n ^ c.charCodeAt(0), 16777619);
   return n >>> 0;
 }
 export function chestLayout(seed: string): ChestState[] {
+  // Every shelter and landing sector has treasure; four inland spots vary.
   const chosen = new Set([
-    0,
-    1,
+    ...Array.from({ length: 14 }, (_, i) => i),
     ...CHEST_SPOTS.map((_, i) => i)
-      .slice(2)
+      .slice(14)
       .sort((a, b) => hash(`${seed}:${a}`) - hash(`${seed}:${b}`))
-      .slice(0, 6),
+      .slice(0, 4),
   ]);
   return CHEST_SPOTS.map((_, i) => ({ active: chosen.has(i), openedAt: 0 }));
 }
@@ -31,13 +44,25 @@ export function chestDrops(seed: string, index: number): WorldDrop[] {
   const spot = CHEST_SPOTS[index],
     roll = hash(`${seed}:loot:${index}`);
   const rarity = roll % 100 < 55 ? 1 : roll % 100 < 90 ? 2 : 3;
-  return [roll % 3, 3 + ((roll >>> 8) % 2)].map((kind, i) => ({
-    x: spot.x + (i - 0.5) * 1.8,
+  const gun: WorldDrop = {
+    x: spot.x - 0.9,
     z: spot.z + 1.8,
-    kind,
-    rarity: kind < 3 ? rarity : 0,
+    kind: roll % 3,
+    rarity,
+    ammo: 0,
     used: false,
-  }));
+  };
+  return [
+    gun,
+    ammoBeside(gun),
+    {
+      x: spot.x - 1.5,
+      z: spot.z - 0.8,
+      kind: 3 + ((roll >>> 8) % 2),
+      rarity: 0,
+      used: false,
+    },
+  ];
 }
 // Shared interaction visibility stops opening or collecting through walls/ceilings.
 export function canReach(

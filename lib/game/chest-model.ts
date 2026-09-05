@@ -4,15 +4,14 @@ export function chestModel() {
   const root = new THREE.Group();
   root.name = 'Toy treasure chest';
   const body = modelKit('Chest base');
-  body.box(1.65, 0.85, 1.1, '#cc743b', 0, 0.48, 0, 0.12);
+  body.box(1.65, 0.85, 1.1, '#cc743b', 0, 0.48, 0);
   for (const x of [-0.56, 0.56])
     body.box(0.14, 0.88, 1.14, '#ffcc4d', x, 0.48, 0);
-  body.box(1.73, 0.12, 1.17, '#ffe090', 0, 0.09, 0);
-  body.box(0.28, 0.32, 0.13, '#ffdc63', 0, 0.84, 0.6, 0.03);
+  body.box(0.28, 0.32, 0.13, '#ffdc63', 0, 0.84, 0.6);
   body.box(0.08, 0.12, 0.025, '#45332c', 0, 0.85, 0.68);
   root.add(body.finish());
   const top = modelKit('Chest lid');
-  top.box(1.7, 0.4, 1.15, '#e59a4a', 0, 0.16, 0.55, 0.12);
+  top.box(1.7, 0.4, 1.15, '#e59a4a', 0, 0.16, 0.55);
   for (const x of [-0.56, 0.56])
     top.box(0.15, 0.42, 1.19, '#ffdc63', x, 0.16, 0.55);
   const hinge = top.finish();
@@ -20,7 +19,7 @@ export function chestModel() {
   hinge.position.set(0, 0.9, -0.55);
   root.add(hinge);
   const glow = new THREE.Mesh(
-    new THREE.RingGeometry(0.95, 1.3, 16),
+    new THREE.RingGeometry(0.95, 1.3, 8),
     new THREE.MeshBasicMaterial({
       color: '#ffd04a',
       transparent: true,

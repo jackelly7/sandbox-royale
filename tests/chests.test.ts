@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import {
   CHEST_SPOTS,
+  floorAmmo,
   chestLayout,
   chestDrops,
   canReach,
@@ -31,12 +32,12 @@ function room() {
     Object.assign(p, { dropping: false, y: 1.7, lastSeen: 6000 });
   return r;
 }
-void test('eight chests vary by round and always include both accessible castle halls', () => {
+void test('eighteen chests vary by round and always include both accessible castle halls', () => {
   assert.deepEqual(chestLayout('one'), chestLayout('one'));
   assert.notDeepEqual(chestLayout('one'), chestLayout('two'));
   for (let round = 0; round < 30; round++) {
     const layout = chestLayout(String(round));
-    assert.equal(layout.filter((c) => c.active).length, 8);
+    assert.equal(layout.filter((c) => c.active).length, 18);
     assert.ok(layout[0].active && layout[1].active);
     for (let i = 0; i < CHEST_SPOTS.length; i++) {
       const p = CHEST_SPOTS[i];
@@ -45,9 +46,9 @@ void test('eight chests vary by round and always include both accessible castle 
         `Chest ${i} is accessible`,
       );
       const drops = chestDrops(String(round), i);
-      assert.equal(drops.length, 2);
+      assert.equal(drops.length, 3);
       assert.ok(drops[0].kind < 3 && drops[0].rarity >= 1);
-      assert.ok(drops[1].kind === 3 || drops[1].kind === 4);
+      assert.ok(drops[2].kind === 3 || drops[2].kind === 4);
     }
   }
 });
@@ -56,7 +57,11 @@ void test('opening a chest is authoritative, happens once, and produces shared c
     [a, b] = r.players,
     p = CHEST_SPOTS[0];
   applyCommand(r, a.id, { type: 'chest', index: 0 }, 6100);
-  assert.equal(r.drops?.length, 0, 'Distant players cannot open it');
+  assert.equal(
+    r.drops?.length,
+    floorAmmo().length,
+    'Distant players cannot open it',
+  );
   Object.assign(a, { ...p, z: p.z + 2 });
   Object.assign(b, { ...p, z: p.z + 2 });
   a.dropping = true;
@@ -67,13 +72,14 @@ void test('opening a chest is authoritative, happens once, and produces shared c
   a.y = 1.7;
   applyCommand(r, a.id, { type: 'chest', index: 0 }, 6300);
   applyCommand(r, b.id, { type: 'chest', index: 0 }, 6300);
-  assert.equal(r.drops!.length, 2);
+  assert.equal(r.drops!.length, floorAmmo().length + 3);
   assert.equal(snapshot(r, 6300).chests![0].openedAt, 6300);
-  const drop = r.drops![0];
+  const index = MAP.loot.length + floorAmmo().length;
+  const drop = r.drops![floorAmmo().length];
   Object.assign(a, { x: drop.x, z: drop.z });
   Object.assign(b, { x: drop.x, z: drop.z });
-  applyCommand(r, a.id, { type: 'pickup', index: MAP.loot.length }, 6400);
-  applyCommand(r, b.id, { type: 'pickup', index: MAP.loot.length }, 6400);
+  applyCommand(r, a.id, { type: 'pickup', index }, 6400);
+  applyCommand(r, b.id, { type: 'pickup', index }, 6400);
   assert.equal(a.owned[drop.kind], true);
   assert.equal(b.owned[drop.kind], false);
   assert.equal(a.tiers![drop.kind], drop.rarity);
@@ -157,7 +163,7 @@ void test('ready up preserves the room and starts exactly one fresh round when e
     ),
   );
   assert.ok(r.chests!.every((c) => !c.openedAt));
-  assert.deepEqual(r.drops, []);
+  assert.equal(r.drops!.length, floorAmmo().length);
   applyCommand(r, 'b', { type: 'ready' }, 7400);
   assert.equal(r.round, 2);
 });
@@ -178,6 +184,7 @@ void test('all chests opened with every drop visible stay within the existing ge
     g.world,
     g.loot.map((l) => l.mesh),
   );
+  for (const d of floorAmmo()) g.addLoot(d);
   for (let i = 0; i < g.chests.length; i++)
     if (g.chests[i].active) g.openChest(i);
   g.chestRenderer!.update(g.chests, 1);

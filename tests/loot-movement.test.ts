@@ -1,9 +1,11 @@
+import { floorAmmo } from '../lib/game/chests.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   floorAvailable,
   floorRarity,
   collectGun,
+  collectAmmo,
   eliminationDrops,
 } from '../lib/game/loot.ts';
 import { weaponDamage, RARITIES } from '../lib/game/rules.ts';
@@ -35,13 +37,8 @@ const setup = () => {
   r.tickAt = 1000;
   return r;
 };
-void test('chests replace sixteen floor pickups while retaining a weapon per landing sector', () => {
-  assert.equal(MAP.loot.filter((_, i) => floorAvailable(i)).length, 31);
-  for (let i = 0; i < 8; i++)
-    assert.equal(
-      [0, 1, 2].filter((k) => floorAvailable(19 + i * 3 + k)).length,
-      1,
-    );
+void test('sixteen loose pickups remain while landing loot moves into chests', () => {
+  assert.equal(MAP.loot.filter((_, i) => floorAvailable(i)).length, 16);
   const rarities = new Set(
     MAP.loot.flatMap((l, i) =>
       l.kind < 3 && floorAvailable(i) ? [floorRarity(i)] : [],
@@ -49,7 +46,7 @@ void test('chests replace sixteen floor pickups while retaining a weapon per lan
   );
   assert.equal(rarities.size, 4);
 });
-void test('rarities increase power, upgrade without downgrades, and transfer finite ammunition', () => {
+void test('weapons always replace their slot and ammo remains separate without duplication', () => {
   const inv = {
     owned: [false, false, false],
     tiers: [0, 0, 0],
@@ -59,16 +56,19 @@ void test('rarities increase power, upgrade without downgrades, and transfer fin
     medkits: 2,
     cells: 1,
   };
-  collectGun(inv, { kind: 0, rarity: 1, ammo: 42 });
-  assert.deepEqual([inv.ammo[0], inv.reserve[0], inv.tiers[0]], [30, 12, 1]);
-  assert.ok(collectGun(inv, { kind: 0, rarity: 3, ammo: 8 }).upgrade);
-  collectGun(inv, { kind: 0, rarity: 0, ammo: 3 });
-  assert.equal(inv.tiers[0], 3);
-  assert.equal(inv.reserve[0], 23);
+  collectGun(inv, { kind: 0, rarity: 1, ammo: 999 });
+  assert.deepEqual([inv.ammo[0], inv.reserve[0]], [0, 0]);
+  collectAmmo(inv, { x: 0, z: 0, kind: 5, rarity: 0, amount: 42, used: false });
+  assert.deepEqual([inv.ammo[0], inv.reserve[0]], [30, 12]);
+  assert.equal(collectGun(inv, { kind: 0, rarity: 3 }).swapped, 1);
+  assert.equal(collectGun(inv, { kind: 0, rarity: 0 }).swapped, 3);
+  assert.equal(inv.tiers[0], 0);
+  assert.deepEqual([inv.ammo[0], inv.reserve[0]], [30, 12]);
   const drops = eliminationDrops(inv, 10, 10);
-  assert.equal(drops.length, 3);
-  assert.equal(drops[0].ammo, 53);
-  assert.equal(drops[0].rarity, 3);
+  assert.equal(drops.length, 4);
+  assert.equal(drops[0].ammo, 0);
+  assert.equal(drops[1].kind, 5);
+  assert.equal(drops[1].amount, 42);
   for (let r = 1; r < RARITIES.length; r++)
     assert.ok(weaponDamage(0, 10, r) > weaponDamage(0, 10, r - 1));
   assert.ok(
@@ -91,9 +91,9 @@ void test('eliminations drop equipment once and one player can claim each stack'
     medkits: 2,
   });
   damageMember(room, b, 10, 1100, a);
-  assert.equal(room.drops?.length, 2);
+  assert.equal(room.drops?.length, 3);
   damageMember(room, b, 10, 1200, a);
-  assert.equal(room.drops?.length, 2);
+  assert.equal(room.drops?.length, 3);
   const gun = room.drops![0];
   Object.assign(a, { x: gun.x, z: gun.z });
   Object.assign(c, { x: gun.x, z: gun.z });
@@ -102,12 +102,12 @@ void test('eliminations drop equipment once and one player can claim each stack'
   assert.equal(a.tiers?.[0], 2);
   assert.equal(a.ammo[0], 19);
   assert.equal(c.owned[0], false);
-  const med = room.drops![1];
+  const med = room.drops![2];
   Object.assign(a, { x: med.x, z: med.z, medkits: 2 });
   applyCommand(
     room,
     a.id,
-    { type: 'pickup', index: MAP.loot.length + 1 },
+    { type: 'pickup', index: MAP.loot.length + 2 },
     1300,
   );
   assert.equal(med.amount, 1);
@@ -116,7 +116,7 @@ void test('eliminations drop equipment once and one player can claim each stack'
   applyCommand(
     room,
     c.id,
-    { type: 'pickup', index: MAP.loot.length + 1 },
+    { type: 'pickup', index: MAP.loot.length + 2 },
     1300,
   );
   assert.equal(c.medkits, 1);
@@ -124,7 +124,7 @@ void test('eliminations drop equipment once and one player can claim each stack'
   room.phase = 'finished';
   applyCommand(room, a.id, { type: 'rematch' }, 1400);
   applyCommand(room, a.id, { type: 'start' }, 1500);
-  assert.equal(room.drops?.length, 0);
+  assert.equal(room.drops?.length, floorAmmo().length);
   assert.ok(room.players.every((p) => p.tiers?.every((tier) => tier === 0)));
 });
 void test('mantling climbs reachable cover and supports movement on top while rejecting high or distant walls', () => {

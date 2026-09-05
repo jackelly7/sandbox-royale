@@ -12,9 +12,9 @@ import {
 
 void test('storm gives players a grace period then closes in phases to the final circle', () => {
   assert.equal(stormRadius(0), INITIAL_CIRCLE);
-  assert.equal(stormRadius(54), INITIAL_CIRCLE);
+  assert.equal(stormRadius(39), INITIAL_CIRCLE);
   assert.ok(stormRadius(100) < stormRadius(50));
-  assert.equal(stormRadius(335), 5);
+  assert.equal(stormRadius(285), 5);
   assert.equal(stormRadius(900), 5);
 });
 void test('weapon wheel wraps and skips weapons not collected', () => {
@@ -46,7 +46,7 @@ void test('fresh players survive any single full blast, including headshots', ()
   for (const weapon of WEAPONS)
     assert.ok(weapon.damage * weapon.pellets * HEADSHOT_MULTIPLIER < 150);
   assert.ok(Math.ceil(150 / WEAPONS[0].damage) >= 10);
-  assert.ok(Math.ceil(150 / (WEAPONS[1].damage * WEAPONS[1].pellets)) >= 3);
+  assert.ok(Math.ceil(150 / (WEAPONS[1].damage * WEAPONS[1].pellets)) >= 2);
   assert.ok(
     WEAPONS[2].damage * HEADSHOT_MULTIPLIER < 100,
     'Sniper headshot cannot one-shot full health',

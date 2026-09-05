@@ -97,7 +97,7 @@ try {
   assert.ok(host.room.storm > 170, 'Small rooms use the full expanded circle');
   assert.equal(host.room.zone.stage, 'waiting');
   assert.ok(
-    host.room.zone.remaining > 40,
+    host.room.zone.remaining > 25,
     'Opening phase leaves time to explore',
   );
   assert.ok(Math.abs(mine(host).z) > 100);
@@ -112,9 +112,9 @@ try {
   assert.ok(
     friend.room.players.find((p) => p.id === host.session.playerId).z > 110,
   );
-  assert.equal(host.room.loot.filter((used) => !used).length, 30);
+  assert.equal(host.room.loot.filter((used) => !used).length, 15);
   console.log(
-    'PASS expanded movement, outer-map loot, and 55-second opening circle across two live sockets',
+    'PASS expanded movement, outer-map loot, and 40-second opening circle across two live sockets',
   );
 } finally {
   for (const c of clients) {

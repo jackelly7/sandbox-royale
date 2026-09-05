@@ -9,8 +9,8 @@ export type Zone = Circle & {
 };
 // Each phase announces its destination before the wall starts moving.
 export const ZONE_PHASES = [
-  { wait: 55, close: 45, radius: 135 },
-  { wait: 35, close: 40, radius: 100 },
+  { wait: 40, close: 30, radius: 135 },
+  { wait: 25, close: 30, radius: 100 },
   { wait: 30, close: 35, radius: 65 },
   { wait: 25, close: 30, radius: 32 },
   { wait: 15, close: 25, radius: 5 },

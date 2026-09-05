@@ -378,6 +378,7 @@ void test('solo bots target and shoot nearby rivals, with no preference for the 
   game.bots.forEach((b, i) => {
     b.hp = i < 2 ? 100 : 0;
     b.armed = true;
+    b.ammunition = 90;
     b.cooldown = 0;
   });
   game.bots[0].mesh.position.set(0, 0, 0);
@@ -465,11 +466,12 @@ void test('solo elimination drops a bot weapon with its rarity even after damage
   b.hp = 0;
   const before = game.loot.length;
   game.killBot(b, true);
-  assert.equal(game.loot.length, before + 1);
+  assert.equal(game.loot.length, before + 2);
   assert.equal(game.loot[before].rarity, 3);
-  assert.equal(game.loot[before].ammo, 17);
+  assert.equal(game.loot[before].ammo, 0);
+  assert.equal(game.loot[before + 1].amount, 17);
   game.killBot(b);
-  assert.equal(game.loot.length, before + 1);
+  assert.equal(game.loot.length, before + 2);
   game.disposeObject(game.scene);
 });
 
@@ -664,7 +666,7 @@ void test('expanded island permits movement beyond the old rim and resets loot a
   assert.ok(positions.some(([x, z]) => Math.hypot(x, z) > 110));
   game.spawnLoot();
   assert.deepEqual(
-    game.loot.map((l) => [l.mesh.position.x, l.mesh.position.z]),
+    game.loot.slice(0, 63).map((l) => [l.mesh.position.x, l.mesh.position.z]),
     positions,
   );
 });

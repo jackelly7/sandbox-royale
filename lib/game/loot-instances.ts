@@ -1,4 +1,4 @@
-import { lootColor } from './loot.ts';
+import { lootColor, isAmmo } from './loot.ts';
 import * as THREE from 'three';
 type Drop = { mesh: THREE.Group; kind: number; rarity?: number; used: boolean };
 export class LootInstances {
@@ -16,7 +16,7 @@ export class LootInstances {
     // across all five item types, with color set once per instance.
     const groups = new Map<string, { drop: Drop; part: number }[]>();
     for (const drop of drops)
-      for (let part = 0; part < 3; part++) {
+      for (let part = 0; part < (isAmmo(drop.kind) ? 1 : 3); part++) {
         const p = drop.mesh.position;
         const key = `${part === 0 ? 'models' : `${p.x < 0 ? 0 : 1}:${p.z < 0 ? 0 : 1}`}:${part}:${part === 0 ? `${drop.kind}:${drop.rarity ?? 0}` : 'all'}`;
         const entries = groups.get(key) ?? [];
@@ -73,7 +73,10 @@ export class LootInstances {
         mesh,
         drops: entries.map((e) => e.drop),
         animated: part === 0,
-        offset: part === 0 ? 0.85 - object.position.y : 0,
+        offset:
+          part === 0
+            ? (isAmmo(drop.kind) ? 0.25 : 0.85) - object.position.y
+            : 0,
       });
     }
     drops.forEach((d) =>

@@ -1,3 +1,5 @@
+import { floorAvailable, floorRarity } from '../lib/game/loot.ts';
+import { floorAmmo, CHEST_SPOTS, chestDrops } from '../lib/game/chests.ts';
 import { MAP } from '../lib/game/map-data.ts';
 import { blocksBody } from '../lib/game/movement.ts';
 import assert from 'node:assert/strict';
@@ -172,24 +174,73 @@ try {
   await host.until(
     (r) => r.phase === 'playing' && r.players.every((p) => !p.dropping),
   );
-  assert.equal(host.room.loot.filter((used) => !used).length, 31);
-  assert.equal(host.room.chests.filter((c) => c.active).length, 8);
-  // Both castles have guaranteed treasure. Follow the open central path to the southern doorway.
-  await walk(host, 0, -23);
-  await walk(host, 29.7, -23);
-  await walk(host, 29.7, -35.95);
-  host.send({ type: 'chest', index: 0 });
-  await host.until((r) => r.chests[0].openedAt > 0);
-  await friend.until((r) => r.chests[0].openedAt > 0 && r.drops.length === 2);
-  host.send({ type: 'chest', index: 0 });
+  assert.equal(host.room.loot.filter((used) => !used).length, 16);
+  assert.equal(host.room.chests.filter((c) => c.active).length, 18);
+  // Select a guaranteed interior chest with a lower-rarity floor counterpart.
+  const chestIndex = [0, 1, 2, 3, 4, 5].find((i) => {
+    const gun = chestDrops(`${host.room.code}:${host.room.round}`, i)[0];
+    return MAP.loot.some(
+      (l, j) =>
+        floorAvailable(j) && l.kind === gun.kind && floorRarity(j) < gun.rarity,
+    );
+  });
+  assert.ok(chestIndex !== undefined);
+  const spot = CHEST_SPOTS[chestIndex];
+  await walk(host, spot.x, spot.z + 2);
+  host.send({ type: 'chest', index: chestIndex });
+  await host.until((r) => r.chests[chestIndex].openedAt > 0);
+  await friend.until(
+    (r) =>
+      r.chests[chestIndex].openedAt > 0 &&
+      r.drops.length === floorAmmo().length + 3,
+  );
+  host.send({ type: 'chest', index: chestIndex });
   await wait(200);
-  assert.equal(host.room.drops.length, 2);
-  const gun = host.room.drops[0];
+  assert.equal(host.room.drops.length, floorAmmo().length + 3);
+  const dropIndex = floorAmmo().length;
+  const gun = host.room.drops[dropIndex];
   await walk(host, gun.x, gun.z);
-  host.send({ type: 'pickup', index: 63 });
-  await host.until((r) => r.drops[0].used);
-  await friend.until((r) => r.drops[0].used);
+  assert.equal(mine(host).owned[gun.kind], false);
+  const ammo = host.room.drops[dropIndex + 1];
+  await walk(host, ammo.x, ammo.z);
+  await host.until((r) => r.drops[dropIndex + 1].used);
+  assert.ok(mine(host).reserve[gun.kind] > 0);
+  assert.equal(mine(host).owned[gun.kind], false);
+  host.send({ type: 'pickup', index: 63 + dropIndex });
+  await host.until((r) => r.drops[dropIndex].used);
+  await friend.until((r) => r.drops[dropIndex].used);
   assert.equal(mine(host).tiers[gun.kind], gun.rarity);
+  const lowerIndex = MAP.loot.findIndex(
+    (l, i) =>
+      floorAvailable(i) && l.kind === gun.kind && floorRarity(i) < gun.rarity,
+  );
+  assert.ok(lowerIndex >= 0);
+  const lower = MAP.loot[lowerIndex];
+  await walk(host, lower.x, lower.z);
+  const countBefore = host.room.drops.length;
+  host.send({ type: 'pickup', index: lowerIndex });
+  await host.until(
+    () => mine(host).tiers[gun.kind] === floorRarity(lowerIndex),
+  );
+  await friend.until((r) => r.loot[lowerIndex]);
+  const swappedIndex = host.room.drops.findIndex(
+    (d, i) =>
+      i >= countBefore && d.kind === gun.kind && d.rarity === gun.rarity,
+  );
+  assert.ok(swappedIndex >= 0, 'The previous gun falls to the ground');
+  const total = mine(host).ammo[gun.kind] + mine(host).reserve[gun.kind];
+  host.send({ type: 'pickup', index: 63 + swappedIndex });
+  await host.until(() => mine(host).tiers[gun.kind] === gun.rarity);
+  assert.equal(
+    host.room.drops.length,
+    countBefore + 1,
+    'Repeat swaps reuse the same ground object',
+  );
+  assert.equal(
+    mine(host).ammo[gun.kind] + mine(host).reserve[gun.kind],
+    total,
+    'Swapping creates no ammo',
+  );
   friend.send({ type: 'leave' });
   await host.until((r) => r.phase === 'finished');
   const late = await connect(
@@ -207,12 +258,12 @@ try {
   await host.until((r) => r.phase === 'countdown' && r.round === 2);
   await late.until((r) => r.phase === 'countdown' && r.round === 2);
   assert.ok(host.room.chests.every((c) => !c.openedAt));
-  assert.equal(host.room.drops.length, 0);
+  assert.equal(host.room.drops.length, floorAmmo().length);
   assert.ok(
     host.room.players.every((p) => !p.ready && p.dropping && !p.spectator),
   );
   console.log(
-    'PASS castle entry, shared chest opening/pickup, late join, and ready-up rematch across live sockets',
+    'PASS castle entry, 18 chests, separate walk-over ammo, manual gun pickup, rarity downgrade/swap, late join and ready-up across live sockets',
   );
 } finally {
   for (const c of clients) {

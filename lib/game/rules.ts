@@ -11,11 +11,11 @@ export const WEAPONS = [
     short: 'ASSAULT RIFLE',
     capacity: 30,
     damage: 14,
-    interval: 0.14,
+    interval: 0.2,
     reload: 1.65,
-    spread: 0.007,
-    aimedSpread: 0.0021,
-    range: 150,
+    spread: 0.065,
+    aimedSpread: 0.004,
+    range: 115,
     pellets: 1,
     color: '#8ee8c8',
   },
@@ -23,12 +23,12 @@ export const WEAPONS = [
     name: 'Breach Shotgun',
     short: 'SHOTGUN',
     capacity: 6,
-    damage: 10,
+    damage: 10.8,
     interval: 0.8,
     reload: 2.1,
     spread: 0.11,
     aimedSpread: 0.09,
-    range: 28,
+    range: 24,
     pellets: 7,
     color: '#ffc06a',
   },
@@ -41,7 +41,7 @@ export const WEAPONS = [
     reload: 2.3,
     spread: 0.1,
     aimedSpread: 0.0003,
-    range: 150,
+    range: 180,
     pellets: 1,
     color: '#dcadff',
   },
@@ -59,7 +59,7 @@ export function cycleWeapon(
     (index + (direction > 0 ? 1 : -1) + available.length) % available.length
   ];
 }
-export const MATCH_LENGTH = 335;
+export const MATCH_LENGTH = 285;
 export const BOT_COUNT = 15;
 export function stormRadius(elapsed: number) {
   return zoneAt(elapsed).radius;
@@ -168,6 +168,10 @@ export function weaponDamage(weapon: number, distance: number, rarity = 0) {
   const w = WEAPONS[weapon];
   if (distance >= w.range) return 0;
   const falloff =
-    weapon === 1 ? Math.max(0, 1 - Math.max(0, distance - 10) / 18) : 1;
+    weapon === 1
+      ? Math.max(0, 1 - Math.max(0, distance - 8) / 16)
+      : weapon === 0
+        ? Math.max(0.2, 1 - Math.max(0, distance - 35) / 75)
+        : 1;
   return w.damage * falloff * (RARITIES[rarity]?.power ?? 1);
 }

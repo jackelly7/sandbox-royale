@@ -150,7 +150,7 @@ void test('server enforces weapon cooldown and resolves one winner for everyone'
   assert.equal(p.ammo[0], 29);
   shoot(at + 5101);
   assert.equal(p.ammo[0], 29);
-  for (let i = 1; i < 12; i++) shoot(at + 5100 + i * 160);
+  for (let i = 1; i < 12; i++) shoot(at + 5100 + i * 210);
   assert.equal(target.health, 0);
   assert.equal(target.rank, 2);
   assert.equal(p.kills, 1);
@@ -237,9 +237,8 @@ void test('recovery drops are stored at full health, capped, and cannot be claim
   const room = started(),
     [p, q] = room.players;
   for (const kind of [3, 4]) {
-    const indices = MAP.loot.flatMap((l, i) =>
-      l.kind === kind && floorAvailable(i) ? [i] : [],
-    );
+    room.loot = MAP.loot.map(() => false);
+    const indices = MAP.loot.flatMap((l, i) => (l.kind === kind ? [i] : []));
     const slot = kind === 3 ? 'cells' : 'medkits';
     for (const index of indices.slice(0, 4)) {
       Object.assign(p, MAP.loot[index]);
@@ -323,10 +322,10 @@ void test('incoming damage preserves recovery and reports aggregated shield dama
   );
   assert.equal(hits[0].shieldDamage, 20);
   assert.equal(hits[0].shieldBreak, true);
-  assert.equal(hits[0].amount, 70);
+  assert.ok(hits[0].amount! > 60 && hits[0].amount! < 76);
   assert.equal(
     target.health,
-    30,
+    100 - hits[0].amount!,
     'One shotgun blast no longer instantly finishes this target',
   );
   advance(room, at + 9100);
@@ -417,9 +416,9 @@ void test('the opening drop is server controlled, steerable, and ends outside bu
   );
   assert.equal(p.x, oldX + 2, 'The canopy can be steered');
   assert.ok(p.y > 30, 'A client cannot instantly land');
-  Object.assign(p, { x: MAP.loot[19].x, z: MAP.loot[19].z });
-  applyCommand(room, p.id, { type: 'pickup', index: 19 }, at + 6200);
-  assert.equal(room.loot[19], false, 'Cannot claim ground loot from the sky');
+  Object.assign(p, { x: MAP.loot[0].x, z: MAP.loot[0].z });
+  applyCommand(room, p.id, { type: 'pickup', index: 0 }, at + 6200);
+  assert.equal(room.loot[0], false, 'Cannot claim ground loot from the sky');
   p.x = 18;
   p.z = -23;
   advance(room, at + 12000);

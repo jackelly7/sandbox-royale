@@ -2,6 +2,8 @@ import {
   CHEST_SPOTS,
   chestLayout,
   chestDrops,
+  floorAmmo,
+  SHELTERS,
   canReach,
   type ChestState,
 } from './chests.ts';
@@ -28,6 +30,9 @@ import {
   floorRarity,
   lootColor,
   collectGun,
+  collectAmmo,
+  isAmmo,
+  AMMO_TYPES,
   eliminationDrops,
   type WorldDrop,
 } from './loot.ts';
@@ -586,12 +591,11 @@ export class BattleGame {
     };
     this.buildCastle(18, -23, '#e5bd75');
     this.buildCastle(-22, -16, '#e2c884');
-    building(30, 20, 12, 10, 5.7, '#65b5c5');
-    building(-35, 28, 12, 10, 6.6, '#e7bc70');
-    building(2, -57, 12, 9, 5, '#e0b365');
+    for (const shelter of SHELTERS) this.buildShelter(shelter);
+
     building(-47, -28, 9, 11, 4.5, '#ed865b');
     building(48, -40, 11, 12, 7.2, '#e1b47c');
-    building(-18, 49, 10, 8, 4.5, '#dfb365');
+
     building(49, 45, 9, 10, 4.5, '#dc7861');
     building(-56, 7, 11, 9, 5.4, '#669f9b');
     // A stepped clock tower gives the island its silhouette.
@@ -795,6 +799,30 @@ export class BattleGame {
     this.box(0.12, 4, 0.12, '#7a6245', x - 5, 8.4, z + 4);
     this.box(2, 1, 0.08, '#a7e3cd', x - 4, 9.7, z + 4);
   }
+  buildShelter({ x, z, w, d }: { x: number; z: number; w: number; d: number }) {
+    const wall = (
+      width: number,
+      height: number,
+      depth: number,
+      dx: number,
+      y: number,
+      dz: number,
+    ) => {
+      const mesh = this.box(width, height, depth, '#e1bd78', x + dx, y, z + dz);
+      mesh.name = 'Shelter wall';
+      this.solid(mesh);
+    };
+    for (const side of [-1, 1]) {
+      wall(0.65, 4, d, (side * w) / 2, 2, 0);
+      for (const part of [-1, 1])
+        wall((w - 4) / 2, 4, 0.65, (part * (w + 4)) / 4, 2, (side * d) / 2);
+      wall(4, 1, 0.65, 0, 3.5, (side * d) / 2);
+    }
+    wall(w + 0.65, 0.3, d + 0.65, 0, 4.15, 0);
+    this.box(w + 0.9, 0.2, d + 0.9, '#77aeab', x, 4.4, z);
+    wall(2, 1.8, 0.5, w / 2 - 2, 0.9, -1);
+    this.box(3.8, 0.035, d + 1, '#c9a368', x, 0.025, z);
+  }
   resetChests(seed: string) {
     if (this.chestRenderer) {
       this.chestRenderer.root.removeFromParent();
@@ -991,6 +1019,8 @@ export class BattleGame {
         used: !floorAvailable(i),
       });
     });
+    if (expanded && !this.network)
+      for (const drop of floorAmmo()) this.addLoot(drop);
     this.rebuildLoot();
   }
   addLoot(drop: WorldDrop) {
@@ -1005,11 +1035,11 @@ export class BattleGame {
       group.add(model);
     } else {
       const item = supplyModel(kind);
-      item.position.y = 0.85;
+      item.position.y = isAmmo(kind) ? 0.25 : 0.85;
       group.add(item);
     }
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.6, 1.25, 12),
+      new THREE.RingGeometry(0.6, 1.25, 6),
       new THREE.MeshBasicMaterial({
         color: color,
         transparent: true,
@@ -1029,6 +1059,10 @@ export class BattleGame {
       }),
     );
     beam.position.y = 2;
+    if (isAmmo(kind)) {
+      beam.scale.setScalar(0);
+      ring.scale.setScalar(0.45);
+    }
     group.add(beam);
     group.position.copy(this.safePosition(drop.x, drop.z));
     group.visible = !drop.used;
@@ -1041,6 +1075,13 @@ export class BattleGame {
       amount: drop.amount,
       used: drop.used,
     });
+  }
+  replaceLoot(index: number, drop: WorldDrop) {
+    const old = this.loot[index];
+    old.mesh.removeFromParent();
+    this.disposeObject(old.mesh);
+    this.addLoot(drop);
+    this.loot[index] = this.loot.pop()!;
   }
   rebuildLoot() {
     if (this.lootInstances) {
@@ -1790,15 +1831,38 @@ export class BattleGame {
         medkits: this.state.medkits,
         cells: this.state.cells,
       };
-      const { first, upgrade } = collectGun(inv, l);
+      const { first, swapped } = collectGun(inv, l);
+      if (swapped !== null) {
+        const old = {
+          x: l.mesh.position.x,
+          z: l.mesh.position.z,
+          kind: l.kind,
+          rarity: swapped,
+          ammo: 0,
+          used: false,
+        };
+        this.state.tiers = inv.tiers;
+        this.selectWeapon(l.kind);
+        if (this.loot.indexOf(l) >= MAP.loot.length) {
+          this.replaceLoot(this.loot.indexOf(l), old);
+          this.rebuildLoot();
+          this.notice(
+            `${RARITIES[l.rarity].name} ${WEAPONS[l.kind].name} · swapped`,
+          );
+          this.sound(620, 0.16, 0.07, 'sine');
+          this.emit();
+          return;
+        }
+        this.addLoot(old);
+      }
       this.state.tiers = inv.tiers;
-      if (first || upgrade) this.selectWeapon(l.kind);
+      this.selectWeapon(l.kind);
       this.showWeapon();
       this.notice(
-        `${RARITIES[l.rarity].name} ${WEAPONS[l.kind].name} · ${upgrade ? 'upgraded' : first ? 'collected' : 'ammo collected'}`,
+        `${RARITIES[l.rarity].name} ${WEAPONS[l.kind].name} · ${first ? 'collected' : 'swapped'}`,
       );
     }
-    if (l.kind >= 3) {
+    if (l.kind === 3 || l.kind === 4) {
       const item = l.kind === 3 ? 'shield' : 'medkit',
         supply = SUPPLIES[item];
       if (this.state[supply.slot] >= SUPPLY_LIMIT) {
@@ -1817,8 +1881,53 @@ export class BattleGame {
     }
     l.used = l.kind < 3 || (l.amount ?? 0) <= 0;
     l.mesh.visible = !l.used;
+    this.rebuildLoot();
     this.sound(620, 0.16, 0.07, 'sine');
     this.emit();
+  }
+  autoAmmo() {
+    if (
+      this.network ||
+      this.state.phase !== 'playing' ||
+      this.state.dropping ||
+      this.isDowned() ||
+      this.mantle
+    )
+      return;
+    const inv = {
+      owned: this.state.owned,
+      ammo: this.weaponAmmo,
+      reserve: this.reserveAmmo,
+    };
+    for (const l of this.loot) {
+      if (
+        !isAmmo(l.kind) ||
+        l.used ||
+        !canReach(
+          this.position,
+          { x: l.mesh.position.x, y: 0.65, z: l.mesh.position.z },
+          this.physicsBounds(),
+          2.5,
+        )
+      )
+        continue;
+      const drop: WorldDrop = {
+        x: l.mesh.position.x,
+        z: l.mesh.position.z,
+        kind: l.kind,
+        rarity: 0,
+        amount: l.amount,
+        used: l.used,
+      };
+      const taken = collectAmmo(inv, drop, !this.state.reloading);
+      l.amount = drop.amount;
+      l.used = drop.used;
+      l.mesh.visible = !l.used;
+      if (taken) {
+        this.notice(`+${taken} ${AMMO_TYPES[l.kind - 5].name}`);
+        this.sound(680, 0.09, 0.025, 'sine');
+      }
+    }
   }
   nearestLoot() {
     let nearest: Loot | undefined,
@@ -1826,6 +1935,7 @@ export class BattleGame {
     for (const loot of this.loot) {
       if (
         loot.used ||
+        isAmmo(loot.kind) ||
         !canReach(
           this.position,
           { x: loot.mesh.position.x, y: 0.85, z: loot.mesh.position.z },
@@ -2453,21 +2563,69 @@ export class BattleGame {
         ...zone,
         radius: Math.max(0, zone.radius - 3),
       });
-      if (!b.armed) {
+      const botKind =
+        b.mesh.getObjectByName('Bot weapon')?.userData.weapon ?? 0;
+      if (b.armed)
+        for (const l of this.loot) {
+          if (
+            l.used ||
+            l.kind !== botKind + 5 ||
+            !canReach(
+              { x: p.x, y: 1.7, z: p.z },
+              { x: l.mesh.position.x, y: 0.65, z: l.mesh.position.z },
+              this.physicsBounds(),
+              2.8,
+            )
+          )
+            continue;
+          b.ammunition = (b.ammunition ?? 0) + (l.amount ?? 0);
+          l.amount = 0;
+          l.used = true;
+          l.mesh.visible = false;
+        }
+      if (!b.armed || !b.ammunition) {
         const chest = this.nearestChest(new THREE.Vector3(p.x, 1.7, p.z));
         if (chest >= 0) this.openChest(chest);
         const supply = this.loot
-          .filter((l) => !l.used && l.kind < 3)
+          .filter(
+            (l) => !l.used && (b.armed ? l.kind === botKind + 5 : l.kind < 3),
+          )
           .sort(
             (a, c) =>
               a.mesh.position.distanceToSquared(p) -
               c.mesh.position.distanceToSquared(p),
           )[0];
+        const treasure = (this.chests ?? [])
+          .map((c, i) => ({ c, i, p: CHEST_SPOTS[i] }))
+          .filter((v) => v.c.active && !v.c.openedAt)
+          .sort(
+            (a, c) =>
+              Math.hypot(a.p.x - p.x, a.p.z - p.z) -
+              Math.hypot(c.p.x - p.x, c.p.z - p.z),
+          )[0];
+        if (
+          treasure &&
+          safe &&
+          (!supply ||
+            Math.hypot(treasure.p.x - p.x, treasure.p.z - p.z) <
+              supply.mesh.position.distanceTo(p))
+        ) {
+          const direction = Math.atan2(treasure.p.x - p.x, treasure.p.z - p.z);
+          this.moveBot(b, direction, 5 * dt);
+          b.mesh.rotation.y = direction;
+          continue;
+        }
         if (supply) {
           if (supply.mesh.position.distanceTo(p) < 2.8) {
+            if (isAmmo(supply.kind)) {
+              b.ammunition = (b.ammunition ?? 0) + (supply.amount ?? 0);
+              supply.amount = 0;
+              supply.used = true;
+              continue;
+            }
             b.armed = true;
             b.rarity = supply.rarity;
-            b.ammunition = supply.ammo ?? WEAPONS[supply.kind].capacity * 3;
+            b.ammunition = 0;
             supply.used = true;
             supply.mesh.visible = false;
             const oldGun = b.mesh.getObjectByName('Bot weapon');
@@ -2536,6 +2694,7 @@ export class BattleGame {
       const weapon = b.mesh.getObjectByName('Bot weapon')?.userData.weapon ?? 0;
       if (
         b.armed &&
+        (b.ammunition ?? 90) > 0 &&
         target &&
         distance < Math.min(47, WEAPONS[weapon].range) &&
         b.cooldown <= 0 &&
@@ -2544,7 +2703,7 @@ export class BattleGame {
         const from = p.clone().add(new THREE.Vector3(0, 1.45, 0));
         if (this.visible(from, target)) {
           b.ammunition = Math.max(0, (b.ammunition ?? 90) - 1);
-          if (b.ammunition === 0) b.armed = false;
+
           this.tracer(from, target, '#ff9c73');
           this.playWeapon(weapon, from);
           if (b.target === -1) this.incomingFire(from);
@@ -2861,13 +3020,14 @@ export class BattleGame {
         !this.network
       )
         this.finish(true);
+      this.autoAmmo();
       const near = this.state.dropping ? undefined : this.nearestLoot();
       this.state.pickup =
         !this.state.dropping && this.nearestChest() >= 0
           ? 'Open treasure chest'
           : near
             ? near.kind < 3
-              ? `${RARITIES[near.rarity].name} ${WEAPONS[near.kind].name}${!this.state.owned[near.kind] ? '' : near.rarity > (this.state.tiers?.[near.kind] ?? 0) ? ' · UPGRADE' : ' · AMMO'}`
+              ? `${RARITIES[near.rarity].name} ${WEAPONS[near.kind].name}${!this.state.owned[near.kind] ? '' : ' · SWAP'}`
               : near.kind === 3
                 ? 'Shield cell · F to use'
                 : 'Medkit · Q to use'
@@ -3316,7 +3476,13 @@ export class BattleGame {
     );
     this.state.owned = [...me.owned];
     this.state.tiers = [...(me.tiers ?? [0, 0, 0])];
-    if (inventoryChanged || newRound) this.state.weapon = me.weapon;
+    if (
+      inventoryChanged ||
+      newRound ||
+      me.pickedUpAt !==
+        previousRoom?.players.find((p) => p.id === me.id)?.pickedUpAt
+    )
+      this.state.weapon = me.weapon;
     this.showWeapon();
     if (me.health <= 0) this.gun.visible = false;
     this.weaponAmmo = [...me.ammo];
@@ -3337,6 +3503,13 @@ export class BattleGame {
       const index = room.loot.length + i;
       if (!this.loot[index]) {
         this.addLoot(drop);
+        added = true;
+      }
+      if (
+        this.loot[index].kind !== drop.kind ||
+        this.loot[index].rarity !== drop.rarity
+      ) {
+        this.replaceLoot(index, drop);
         added = true;
       }
       this.loot[index].used = drop.used;
@@ -3444,7 +3617,11 @@ export class BattleGame {
         );
       }
       if (e.type === 'pickup' && e.player === me.id) {
-        this.notice('Supplies collected');
+        this.notice(
+          e.ammoKind !== undefined
+            ? `+${e.amount} ${AMMO_TYPES[e.ammoKind].name}`
+            : 'Supplies collected',
+        );
         this.sound(620, 0.16, 0.07, 'sine');
       }
     }

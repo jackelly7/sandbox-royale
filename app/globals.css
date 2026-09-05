@@ -3551,3 +3551,8 @@ kbd {
     animation: none;
   }
 }
+
+.crosshair.rifle-hip:not(.ads) {
+  width: 40px;
+  height: 40px;
+}
