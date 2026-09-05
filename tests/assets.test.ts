@@ -42,7 +42,7 @@ function stats(root: THREE.Object3D) {
   });
   return { calls, triangles };
 }
-void test('detailed assets stay below previous full-match draw and triangle budgets', () => {
+void test('detailed assets and added cover stay within full-match rendering budgets', () => {
   const game = world();
   game.resetBots();
   const empty = stats(game.world);
@@ -63,8 +63,8 @@ void test('detailed assets stay below previous full-match draw and triangle budg
   const equipped = stats(game.world);
   const priorEquippedTriangles = 28898 + 5 * (104 + 160 + 232) + 15 * 172 + 104;
   assert.ok(
-    equipped.triangles <= priorEquippedTriangles,
-    `Equipped baseline ${priorEquippedTriangles}: ${JSON.stringify(equipped)}`,
+    equipped.triangles <= 35000,
+    `Equipped limit 35000 with added cover (original ${priorEquippedTriangles}): ${JSON.stringify(equipped)}`,
   );
   assert.ok(equipped.calls < 200, JSON.stringify(equipped));
   console.log(

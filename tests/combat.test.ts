@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { BattleGame, type GameState } from '../lib/game/engine.ts';
 import { parachuteModel } from '../lib/game/parachute.ts';
 import { batchIsland } from '../lib/game/render-world.ts';
+import { completeRecovery } from '../lib/game/rules.ts';
 import { weaponModel } from '../lib/game/weapon-models.ts';
 
 // Exercise Three.js geometry, raycasting, and match logic without a GPU or browser.
@@ -19,6 +20,7 @@ function arena() {
     solids: [],
     ray: new THREE.Raycaster(),
     tracers: [],
+    footsteps: new Map(),
     weaponAmmo: [30, 6, 5],
     reserveAmmo: [120, 30, 20],
     yaw: 0,
@@ -243,7 +245,7 @@ void test('room forms stop GPU rendering while the animation loop stays resumabl
   assert.equal(renders, 1, 'Background tabs must not render');
 });
 
-void test('solo recovery uses inventory and retains the item when interrupted', () => {
+void test('solo recovery continues through damage and consumes the item on completion', () => {
   const game = arena();
   game.state.health = 30;
   game.state.medkits = 1;
@@ -251,9 +253,13 @@ void test('solo recovery uses inventory and retains the item when interrupted', 
   assert.equal(game.state.healing, 'medkit');
   assert.equal(game.state.healRemaining, 4);
   game.damage(5, new THREE.Vector3(10, 1.7, 50));
-  assert.equal(game.state.healing, null);
+  assert.equal(game.state.healing, 'medkit');
+  assert.equal(game.state.healUntil, 4000);
   assert.equal(game.state.medkits, 1);
   assert.equal(game.state.damageAngle, 90);
+  assert.ok(completeRecovery(game.state, 4000));
+  assert.equal(game.state.health, 100);
+  assert.equal(game.state.medkits, 0);
 });
 void test('spectators cycle only living players and cannot heal or claim supplies', () => {
   const game = arena();
@@ -356,4 +362,83 @@ void test('aiming a sniper clears its physical scope from the camera and restore
   game.state.weapon = 0;
   game.setAiming(true);
   assert.equal(game.gun.visible, true);
+});
+
+void test('solo bots target and shoot nearby rivals, with no preference for the human', (t) => {
+  const game = arena();
+  game.resetBots();
+  game.bots.forEach((b, i) => {
+    b.hp = i < 2 ? 100 : 0;
+    b.armed = true;
+    b.cooldown = 0;
+  });
+  game.bots[0].mesh.position.set(0, 0, 0);
+  game.bots[1].mesh.position.set(0, 0, 10);
+  game.position.set(0, 1.7, 30);
+  assert.equal(game.chooseBotTarget(game.bots[0]), 1);
+  const shield = game.bots[1].shield;
+  t.mock.method(Math, 'random', () => 0);
+  game.time = 1;
+  game.updateBots(0.016);
+  assert.ok(game.bots[1].shield < shield);
+  assert.equal(
+    game.state.shield,
+    50,
+    'Bots choose each other over a farther human',
+  );
+  game.position.set(0, 1.7, 2);
+  assert.equal(game.chooseBotTarget(game.bots[0]), -1);
+  game.bots[1].hp = 0;
+  game.position.set(0, 1.7, 30);
+  const cover = game.box(8, 3, 1, '#999', 0, 1.5, 15);
+  game.solid(cover);
+  game.scene.updateMatrixWorld(true);
+  assert.equal(
+    game.chooseBotTarget(game.bots[0]),
+    null,
+    'Solid cover hides the human',
+  );
+  game.disposeObject(game.scene);
+});
+void test('new sand cover blocks bullets and movement while leaving loot accessible', () => {
+  const game = arena();
+  game.buildWorld();
+  const walls = game.world.children.filter((o) => o.name === 'Sand cover');
+  assert.equal(walls.length, 40);
+  for (const wall of walls) {
+    const b = new THREE.Box3().setFromObject(wall);
+    const p = wall.position;
+    assert.ok(game.blocked(p.x, p.z));
+    const wide = b.max.x - b.min.x > b.max.z - b.min.z;
+    const from = new THREE.Vector3(
+      p.x + (wide ? 0 : 4),
+      1.7,
+      p.z + (wide ? 4 : 0),
+    );
+    const to = new THREE.Vector3(
+      p.x - (wide ? 0 : 4),
+      1.7,
+      p.z - (wide ? 4 : 0),
+    );
+    assert.equal(game.visible(from, to), false);
+  }
+  game.disposeObject(game.scene);
+});
+
+void test('solo shotgun hits up close and cannot damage a distant rival', () => {
+  for (const distance of [7, 35]) {
+    const game = arena();
+    game.resetBots();
+    game.bots.forEach((b, i) => {
+      b.hp = i === 0 ? 100 : 0;
+    });
+    game.bots[0].mesh.position.set(0, 0, 0);
+    game.camera.position.set(0, 1.3, distance);
+    game.camera.lookAt(0, 1.3, 0);
+    game.state.weapon = 1;
+    game.aiming = true;
+    game.shoot();
+    assert.equal(game.bots[0].shield < 50, distance === 7);
+    game.disposeObject(game.scene);
+  }
 });

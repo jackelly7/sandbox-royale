@@ -47,6 +47,7 @@ import type {
   ConnectionStatus,
 } from '@/lib/game/multiplayer';
 import { WEAPONS, SUPPLIES } from '@/lib/game/rules';
+import { zoneAt } from '@/lib/game/zones';
 
 const initial: GameState = {
   phase: 'lobby',
@@ -214,12 +215,25 @@ function IslandMap({
       {state.phase !== 'lobby' && (
         <>
           <circle
+            cx={state.zone?.x ?? 0}
+            cy={state.zone?.z ?? 0}
             r={state.storm}
             fill="none"
             stroke="#e7ccff"
             strokeWidth="2"
-            strokeDasharray="4 2"
           />
+          {state.zone && state.zone.stage !== 'final' && (
+            <circle
+              cx={state.zone.next.x}
+              cy={state.zone.next.z}
+              r={state.zone.next.radius}
+              fill="none"
+              stroke="#ffffff"
+              strokeWidth="1.5"
+              strokeDasharray="4 3"
+              aria-label="Next safe circle"
+            />
+          )}
           {state.bots
             .filter((b) => Math.hypot(b.x - state.x, b.z - state.z) < 30)
             .map((b, i) => (
@@ -411,10 +425,8 @@ export default function Home() {
     Math.hypot(teammate.x - state.x, teammate.z - state.z) <= 3
       ? teammate
       : null;
-  const time = Math.max(
-    0,
-    Math.ceil(state.elapsed < 35 ? 35 - state.elapsed : 270 - state.elapsed),
-  );
+  const zone = state.zone ?? zoneAt(state.elapsed);
+  const time = Math.ceil(zone.remaining);
   const clock = `${Math.floor(time / 60)
     .toString()
     .padStart(2, '0')}:${(time % 60).toString().padStart(2, '0')}`;
@@ -664,21 +676,21 @@ export default function Home() {
             <div className={`storm-timer ${state.outside ? 'danger' : ''}`}>
               <span className="storm-symbol">◉</span>
               <span>
-                {state.elapsed < 35 ? 'STORM CLOSES IN' : 'STORM CLOSING'}
+                {zone.stage === 'final'
+                  ? 'FINAL CIRCLE'
+                  : `ZONE ${zone.phase} · ${zone.stage === 'waiting' ? 'CLOSES IN' : 'CLOSING'}`}
               </span>
-              <b>{clock}</b>
+              <b>{zone.stage === 'final' ? '' : clock}</b>
             </div>
           </div>
           {playing && (
             <div
-              className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
+              className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : state.weapon === 2 ? 'sniper-hip' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
             >
               <span />
               <span />
               <span />
               <span />
-              <i className="aim-dot" />
-              {state.hit > 0 && <b>×</b>}
             </div>
           )}
           {playing && state.aiming && state.weapon === 2 && (
@@ -688,7 +700,6 @@ export default function Home() {
             >
               <span className="scope-horizontal" />
               <span className="scope-vertical" />
-              <i />
               <small>3×</small>
             </div>
           )}
@@ -786,12 +797,14 @@ export default function Home() {
               <Navigation
                 size={20}
                 style={{
-                  transform: `rotate(${(Math.atan2(state.x, state.z) * -180) / Math.PI + state.heading - 45}deg)`,
+                  transform: `rotate(${(Math.atan2(state.x - zone.x, state.z - zone.z) * -180) / Math.PI + state.heading - 45}deg)`,
                 }}
               />
               {Math.max(
                 1,
-                Math.ceil(Math.hypot(state.x, state.z) - state.storm),
+                Math.ceil(
+                  Math.hypot(state.x - zone.x, state.z - zone.z) - zone.radius,
+                ),
               )}
               m TO SAFETY · MOVE TOWARD THE ARROW
             </div>
@@ -856,28 +869,6 @@ export default function Home() {
                 </p>
                 <small>You land unarmed. Pick a glowing drop below.</small>
               </div>
-              <div className="aerial-loot" aria-hidden="true">
-                {state.dropLoot?.map((l, i) => (
-                  <div
-                    key={i}
-                    style={{
-                      left: `${l.x}%`,
-                      top: `${l.y}%`,
-                      borderColor:
-                        l.kind < 3
-                          ? WEAPONS[l.kind].color
-                          : l.kind === 3
-                            ? '#90e1f7'
-                            : '#ffaaa2',
-                    }}
-                  >
-                    <span>
-                      {['AR', 'SHOTGUN', 'SNIPER', 'SHIELD', 'MEDKIT'][l.kind]}
-                    </span>
-                    <small>{Math.round(l.distance)}m</small>
-                  </div>
-                ))}
-              </div>
             </>
           )}
           {state.phase === 'dying' && (
@@ -921,7 +912,7 @@ export default function Home() {
                   />
                 </div>
                 <small>
-                  {state.healRemaining.toFixed(1)}s · Damage interrupts healing
+                  {state.healRemaining.toFixed(1)}s · Keep moving · X to cancel
                 </small>
               </div>
               <button
@@ -1415,9 +1406,9 @@ export default function Home() {
                   and press E to collect it. Use 1–3 or the scroll wheel to
                   switch between weapons you have collected. Red medkits and
                   blue shield cells go into your inventory. Press Q to heal or F
-                  to restore shields. Carry up to three of each. Damage, firing,
-                  switching weapons, or reloading cancels healing without using
-                  the item.
+                  to restore shields. Carry up to three of each. Healing
+                  continues when you take damage. Firing, switching weapons, or
+                  reloading cancels healing without using the item.
                 </p>
               </div>
               <p className="touch-help">
@@ -1500,7 +1491,10 @@ export default function Home() {
               <IslandMap state={state} large />
               <div className="map-legend">
                 <span>
-                  <i className="legend-safe" /> Safe zone
+                  <i className="legend-safe" /> Current circle
+                </span>
+                <span>
+                  <i className="legend-next" /> Next circle
                 </span>
                 <span>
                   <i className="legend-player" /> Your position
@@ -1510,8 +1504,8 @@ export default function Home() {
                 </span>
               </div>
               <p className="touch-help">
-                The storm starts closing after 35 seconds. Head toward the
-                center before it catches you.
+                The white dashed ring marks the next safe circle. Each phase
+                pauses before the purple wall moves and shrinks toward it.
               </p>
             </>
           )}

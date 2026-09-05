@@ -1,3 +1,4 @@
+import type { Zone } from './zones.ts';
 import type { RecoveryState, SupplyKind } from './rules.ts';
 export type PlayerPose = {
   x: number;
@@ -40,6 +41,7 @@ export type RoomSnapshot = {
   startAt: number;
   now: number;
   storm: number;
+  zone?: Zone;
   winner: string | null;
   players: Player[];
   loot: boolean[];

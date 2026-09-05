@@ -1,9 +1,11 @@
+import { zoneAt, outsideZone } from '../lib/game/zones.ts';
 import { randomUUID } from 'node:crypto';
 import { MAP } from '../lib/game/map-data.ts';
 import {
   WEAPONS,
   HEADSHOT_MULTIPLIER,
-  stormRadius,
+  shotDirection,
+  weaponDamage,
   takeDamage,
   reloadAmmo,
   SUPPLY_LIMIT,
@@ -192,11 +194,11 @@ export function damageMember(
     target.spectator
   )
     return;
-  cancelRecovery(target);
   stopRevive(target);
   for (const q of room.players) if (q.reviving === target.id) stopRevive(q);
   Object.assign(target, takeDamage(target.health, target.shield, amount));
   if (target.health > 0) return;
+  cancelRecovery(target);
   if (
     !target.downed &&
     room.players.some(
@@ -278,7 +280,7 @@ export function advance(room: Room, now: number) {
   if (room.phase === 'countdown' && now >= room.startAt) room.phase = 'playing';
   if (room.phase !== 'playing') return;
   const elapsed = Math.max(0, (now - room.startAt) / 1000),
-    radius = stormRadius(elapsed);
+    zone = zoneAt(elapsed, `${room.code}:${room.round}`);
   for (const p of room.players) {
     if (p.health <= 0) continue;
     if (p.downed && now >= (p.bleedOutAt ?? 0)) {
@@ -303,8 +305,7 @@ export function advance(room: Room, now: number) {
       eliminate(room, p, now);
       continue;
     }
-    if (Math.hypot(p.x, p.z) > radius) {
-      cancelRecovery(p);
+    if (outsideZone(p.x, p.z, zone)) {
       stopRevive(p);
       p.health = Math.max(0, p.health - dt * (elapsed > 180 ? 11 : 5));
       if (!p.health) eliminate(room, p, now);
@@ -456,15 +457,8 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
     }
   >();
   for (let n = 0; n < w.pellets; n++) {
-    const spread = w.spread * (aiming ? 0.3 : 1),
-      yaw = p.yaw + (Math.random() - 0.5) * spread,
-      pitch = p.pitch + (Math.random() - 0.5) * spread;
-    const dir = [
-      -Math.sin(yaw) * Math.cos(pitch),
-      Math.sin(pitch),
-      -Math.cos(yaw) * Math.cos(pitch),
-    ];
-    let nearest = 150,
+    const dir = shotDirection(p.yaw, p.pitch, p.weapon, aiming, n);
+    let nearest = w.range,
       target: Member | undefined;
     for (const box of MAP.colliders) {
       const t = rayBox(origin, dir, box.min, box.max);
@@ -496,7 +490,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
         oldShield = target.shield;
       const amount = Math.min(
         oldHealth + oldShield,
-        w.damage * (headshot ? HEADSHOT_MULTIPLIER : 1),
+        weaponDamage(p.weapon, nearest) * (headshot ? HEADSHOT_MULTIPLIER : 1),
       );
       damageMember(room, target, amount, now, p);
       const hit = hits.get(target.id) ?? {
@@ -707,6 +701,10 @@ export function applyCommand(
   advance(room, now);
 }
 export function snapshot(room: Room, now: number): RoomSnapshot {
+  const zone = zoneAt(
+    Math.max(0, (now - room.startAt) / 1000),
+    `${room.code}:${room.round}`,
+  );
   return {
     code: room.code,
     host: room.host,
@@ -716,7 +714,8 @@ export function snapshot(room: Room, now: number): RoomSnapshot {
     round: room.round,
     startAt: room.startAt,
     now,
-    storm: stormRadius(Math.max(0, (now - room.startAt) / 1000)),
+    storm: zone.radius,
+    zone,
     winner: room.winner,
     players: room.players.map(
       ({

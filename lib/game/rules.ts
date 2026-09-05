@@ -1,3 +1,4 @@
+import { zoneAt } from './zones.ts';
 export const WEAPONS = [
   {
     name: 'Ranger AR',
@@ -7,6 +8,8 @@ export const WEAPONS = [
     interval: 0.14,
     reload: 1.65,
     spread: 0.007,
+    aimedSpread: 0.0021,
+    range: 150,
     pellets: 1,
     color: '#8ee8c8',
   },
@@ -17,7 +20,9 @@ export const WEAPONS = [
     damage: 10,
     interval: 0.8,
     reload: 2.1,
-    spread: 0.052,
+    spread: 0.11,
+    aimedSpread: 0.09,
+    range: 28,
     pellets: 7,
     color: '#ffc06a',
   },
@@ -28,7 +33,9 @@ export const WEAPONS = [
     damage: 50,
     interval: 1.2,
     reload: 2.3,
-    spread: 0.001,
+    spread: 0.1,
+    aimedSpread: 0.0003,
+    range: 150,
     pellets: 1,
     color: '#dcadff',
   },
@@ -49,7 +56,7 @@ export function cycleWeapon(
 export const MATCH_LENGTH = 270;
 export const BOT_COUNT = 15;
 export function stormRadius(elapsed: number) {
-  return Math.max(5, 107 - Math.max(0, elapsed - 35) * 0.44);
+  return zoneAt(elapsed).radius;
 }
 export function takeDamage(health: number, shield: number, amount: number) {
   const absorbed = Math.min(shield, amount);
@@ -128,3 +135,33 @@ export const DROP_HEIGHT = 42;
 export const DROP_SPEED = 6;
 
 export const HEADSHOT_MULTIPLIER = 1.5;
+
+// Angular spread is identical in solo and on the authoritative multiplayer server.
+export function shotDirection(
+  yaw: number,
+  pitch: number,
+  weapon: number,
+  aiming: boolean,
+  pellet = 0,
+): [number, number, number] {
+  const w = WEAPONS[weapon];
+  const spread = aiming ? w.aimedSpread : w.spread;
+  const angle =
+    w.pellets > 1 ? ((pellet - 1) * Math.PI) / 3 : Math.random() * Math.PI * 2;
+  const radius =
+    w.pellets > 1
+      ? pellet === 0
+        ? 0
+        : spread / 2
+      : (Math.sqrt(Math.random()) * spread) / 2;
+  const y = yaw + Math.cos(angle) * radius;
+  const p = pitch + Math.sin(angle) * radius;
+  return [-Math.sin(y) * Math.cos(p), Math.sin(p), -Math.cos(y) * Math.cos(p)];
+}
+export function weaponDamage(weapon: number, distance: number) {
+  const w = WEAPONS[weapon];
+  if (distance >= w.range) return 0;
+  const falloff =
+    weapon === 1 ? Math.max(0, 1 - Math.max(0, distance - 10) / 18) : 1;
+  return w.damage * falloff;
+}

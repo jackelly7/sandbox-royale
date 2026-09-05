@@ -1,3 +1,4 @@
+import { zoneAt, outsideZone, type Zone } from './zones.ts';
 import * as THREE from 'three';
 import { footstepDirection } from './sound-cues.ts';
 import { parachuteModel } from './parachute.ts';
@@ -17,7 +18,8 @@ import {
   BOT_COUNT,
   WEAPONS,
   HEADSHOT_MULTIPLIER,
-  stormRadius,
+  shotDirection,
+  weaponDamage,
   takeDamage,
   reloadAmmo,
   cycleWeapon,
@@ -51,6 +53,7 @@ export type GameState = RecoveryState & {
   owned: boolean[];
   elapsed: number;
   storm: number;
+  zone?: Zone;
   outside: boolean;
   reloading: boolean;
   aiming: boolean;
@@ -63,7 +66,6 @@ export type GameState = RecoveryState & {
   z: number;
   rank: number;
   bots: { x: number; z: number }[];
-  dropLoot?: { x: number; y: number; kind: number; distance: number }[];
   pingPoints?: { id: string; x: number; z: number; label: string }[];
   footsteps?: { id: string; angle: number; strength: number }[];
   markers?: {
@@ -100,7 +102,8 @@ type Bot = {
   hp: number;
   shield: number;
   cooldown: number;
-  turn: number;
+  target?: number | null;
+  thinkAt?: number;
   seed: number;
   name: string;
   tag?: THREE.Sprite;
@@ -240,7 +243,7 @@ export class BattleGame {
   uiTime = 0;
   noticeTimer = 0;
   recoil = 0;
-  aiTimer = 0;
+  zoneSeed = 'sandbox';
   audio: AudioContext | null = null;
   observer: ResizeObserver;
   cleanup: (() => void)[] = [];
@@ -642,6 +645,43 @@ export class BattleGame {
     this.storm.visible = false;
     this.scene.add(this.storm);
     this.spawnLoot();
+    this.buildCover();
+  }
+  buildCover() {
+    // Short L-shaped sand walls break long sightlines, with two open exits.
+    for (let x = -72; x <= 72; x += 24)
+      for (let z = -72; z <= 72; z += 24) {
+        if (Math.hypot(x, z) > 94) continue;
+        const space = new THREE.Box3(
+          new THREE.Vector3(x - 5, 0, z - 5),
+          new THREE.Vector3(x + 5, 3, z + 5),
+        );
+        if (
+          this.colliders.some((b) => b.intersectsBox(space)) ||
+          this.loot.some(
+            (l) =>
+              Math.abs(l.mesh.position.x - x) < 6 &&
+              Math.abs(l.mesh.position.z - z) < 6,
+          )
+        )
+          continue;
+        const horizontal = ((x + z) / 24) % 2 === 0;
+        const parts = horizontal
+          ? [
+              [0, 0, 6, 1],
+              [-2.5, 1.5, 1, 4],
+            ]
+          : [
+              [0, 0, 1, 6],
+              [1.5, 2.5, 4, 1],
+            ];
+        for (const [dx, dz, w, d] of parts) {
+          const wall = this.box(w, 2.6, d, '#d8b16e', x + dx, 1.3, z + dz);
+          wall.name = 'Sand cover';
+          this.solid(wall);
+          this.box(w + 0.12, 0.18, d + 0.12, '#f1d697', x + dx, 2.62, z + dz);
+        }
+      }
   }
   random(seed: number) {
     return () => {
@@ -908,7 +948,8 @@ export class BattleGame {
         hp: 100,
         shield: 50,
         cooldown: 2 + i * 0.2,
-        turn: 0,
+        target: null,
+        thinkAt: i * 0.025,
         seed: i * 0.7,
         name: names[i],
         tag,
@@ -1217,7 +1258,8 @@ export class BattleGame {
       }
       this.spawnLoot();
       this.noticeTimer = 5;
-      this.aiTimer = 0;
+      this.zoneSeed = String(Math.random());
+      this.state.zone = zoneAt(0, this.zoneSeed);
     }
     if (
       this.network &&
@@ -1505,21 +1547,22 @@ export class BattleGame {
         aiming: this.aiming,
       });
     let hit = false;
+    const aim = this.camera.getWorldDirection(new THREE.Vector3());
+    const aimYaw = Math.atan2(-aim.x, -aim.z),
+      aimPitch = Math.asin(aim.y);
     for (let p = 0; p < w.pellets; p++) {
-      const spread = w.spread * (this.aiming ? 0.3 : 1);
-      this.ray.setFromCamera(
-        new THREE.Vector2(
-          (Math.random() - 0.5) * spread,
-          (Math.random() - 0.5) * spread,
+      this.ray.set(
+        this.camera.getWorldPosition(new THREE.Vector3()),
+        new THREE.Vector3(
+          ...shotDirection(aimYaw, aimPitch, this.state.weapon, this.aiming, p),
         ),
-        this.camera,
       );
       const enemies = this.bots.filter((b) => b.hp > 0).map((b) => b.mesh);
       const hits = this.ray.intersectObjects(
         [...this.solids, ...enemies],
         true,
       );
-      const first = hits[0];
+      const first = hits.find((h) => h.distance < w.range);
       if (!this.network && first && first.object.userData.bot !== undefined) {
         const b = this.bots[first.object.userData.bot];
         if (b.hp > 0) {
@@ -1529,7 +1572,8 @@ export class BattleGame {
           const result = takeDamage(
             b.hp,
             b.shield,
-            w.damage * (headshot ? HEADSHOT_MULTIPLIER : 1),
+            weaponDamage(this.state.weapon, first.distance) *
+              (headshot ? HEADSHOT_MULTIPLIER : 1),
           );
           b.hp = result.health;
           b.shield = result.shield;
@@ -1545,7 +1589,7 @@ export class BattleGame {
       }
       const end = first
         ? first.point
-        : this.ray.ray.at(120, new THREE.Vector3());
+        : this.ray.ray.at(w.range, new THREE.Vector3());
       if (p === 0)
         this.tracer(
           this.camera.localToWorld(new THREE.Vector3(0.2, -0.17, -0.7)),
@@ -1574,7 +1618,7 @@ export class BattleGame {
     if (chute) chute.visible = false;
     if (b.tag) b.tag.visible = false;
   }
-  killBot(b: Bot, player = false) {
+  killBot(b: Bot, player = false, killer = 'The sandbox') {
     this.beginBotDeath(b);
     b.hp = 0;
     if (player) {
@@ -1582,12 +1626,11 @@ export class BattleGame {
       this.state.eliminationPulse = 1;
       this.notice(`Eliminated ${b.name}`);
     }
-    this.addFeed(`${player ? 'You' : 'The sandbox'} eliminated ${b.name}`);
+    this.addFeed(`${player ? 'You' : killer} eliminated ${b.name}`);
     this.state.alive = this.bots.filter((b) => b.hp > 0).length + 1;
   }
   damage(amount: number, from?: THREE.Vector3, killer = 'The storm') {
     this.state.killer = killer;
-    this.cancelHeal();
     this.state.damageAngle = from
       ? ((Math.atan2(-(from.x - this.position.x), -(from.z - this.position.z)) -
           this.yaw) *
@@ -1669,12 +1712,9 @@ export class BattleGame {
     return !hit || hit.distance > distance;
   }
   updateBots(dt: number) {
-    const target = this.position.clone();
-    target.y = 1.3;
     for (const b of this.bots) {
       if (b.hp <= 0) continue;
-      const p = b.mesh.position,
-        distance = p.distanceTo(this.position);
+      const p = b.mesh.position;
       if (b.dropping) {
         p.y = Math.max(0, p.y - DROP_SPEED * dt);
         if (p.y === 0) {
@@ -1698,7 +1738,11 @@ export class BattleGame {
         continue;
       }
       b.cooldown -= dt;
-      const safe = Math.hypot(p.x, p.z) < this.state.storm - 5;
+      const zone = this.state.zone ?? { x: 0, z: 0, radius: this.state.storm };
+      const safe = !outsideZone(p.x, p.z, {
+        ...zone,
+        radius: Math.max(0, zone.radius - 3),
+      });
       if (!b.armed) {
         const supply = this.loot
           .filter((l) => !l.used && l.kind < 3)
@@ -1719,6 +1763,10 @@ export class BattleGame {
             }
             const held = weaponModel(supply.kind);
             held.name = 'Bot weapon';
+            held.userData.weapon = supply.kind;
+            held.traverse((o) => {
+              o.userData.bot = b.mesh.userData.bot;
+            });
             held.scale.setScalar(0.8);
             held.rotation.y = Math.PI;
             held.position.set(0.35, 1.35, 0.25);
@@ -1728,83 +1776,117 @@ export class BattleGame {
               supply.mesh.position.x - p.x,
               supply.mesh.position.z - p.z,
             );
-            this.move(
-              p,
-              Math.sin(direction) * 4 * dt,
-              Math.cos(direction) * 4 * dt,
-            );
-            b.mesh.rotation.y = direction;
-            continue;
+            if (safe) {
+              this.moveBot(b, direction, 4 * dt);
+              b.mesh.rotation.y = direction;
+              animateCharacter(b.mesh, this.time * 9 + b.seed, 0.3);
+              this.hearStep(b.name, p.x, p.z);
+              continue;
+            }
           }
         }
       }
+      if (this.time >= (b.thinkAt ?? 0)) {
+        b.target = this.chooseBotTarget(b);
+        b.thinkAt = this.time + 0.35;
+      }
+      const opponent = b.target === -1 ? null : this.bots[b.target ?? -1];
+      const target =
+        b.target === -1 && this.state.health > 0 && !this.state.dropping
+          ? this.position.clone().setY(1.3)
+          : opponent && opponent.hp > 0 && !opponent.dropping
+            ? opponent.mesh.position.clone().add(new THREE.Vector3(0, 1.3, 0))
+            : null;
+      const distance = target
+        ? Math.hypot(target.x - p.x, target.z - p.z)
+        : Infinity;
       const angle = !safe
-        ? Math.atan2(-p.x, -p.z)
-        : distance < 43
-          ? Math.atan2(this.position.x - p.x, this.position.z - p.z)
+        ? Math.atan2(zone.x - p.x, zone.z - p.z)
+        : target
+          ? Math.atan2(target.x - p.x, target.z - p.z)
           : b.seed + Math.sin(this.time * 0.13 + b.seed) * 2;
       const speed =
         (!safe ? 5.8 : distance < 3.5 ? 0 : distance < 13 ? 1.7 : 3.2) * dt;
       const old = p.clone();
-      this.move(p, Math.sin(angle) * speed, Math.cos(angle) * speed);
-      if (p.distanceToSquared(old) < 0.0001) {
-        b.seed += dt * 3;
-        this.move(p, Math.cos(angle) * speed, -Math.sin(angle) * speed);
-      }
+      this.moveBot(b, angle, speed);
       if (p.distanceToSquared(old) > 0.0001) this.hearStep(b.name, p.x, p.z);
       b.mesh.rotation.y = angle;
       animateCharacter(b.mesh, this.time * 9 + b.seed, speed > 0 ? 0.3 : 0);
-      if (!safe) {
+      if (outsideZone(p.x, p.z, zone)) {
         b.hp -= dt * (this.state.elapsed > 160 ? 5 : 2);
         if (b.hp <= 0) {
           this.killBot(b);
           continue;
         }
       }
+      const weapon = b.mesh.getObjectByName('Bot weapon')?.userData.weapon ?? 0;
       if (
         b.armed &&
-        distance < 47 &&
+        target &&
+        distance < Math.min(47, WEAPONS[weapon].range) &&
         b.cooldown <= 0 &&
         this.state.phase === 'playing'
       ) {
         const from = p.clone().add(new THREE.Vector3(0, 1.45, 0));
         if (this.visible(from, target)) {
           this.tracer(from, target, '#ff9c73');
-          this.incomingFire(from);
-          if (Math.random() < (distance < 18 ? 0.68 : 0.38))
-            this.damage(5 + Math.random() * 4, from, b.name);
+          if (b.target === -1) this.incomingFire(from);
+          if (Math.random() < (distance < 18 ? 0.68 : 0.38)) {
+            const amount =
+              (5 + Math.random() * 4) *
+              (weaponDamage(weapon, distance) / WEAPONS[weapon].damage);
+            if (b.target === -1) this.damage(amount, from, b.name);
+            else if (opponent) {
+              const hit = takeDamage(opponent.hp, opponent.shield, amount);
+              opponent.hp = hit.health;
+              opponent.shield = hit.shield;
+              if (opponent.hp <= 0) this.killBot(opponent, false, b.name);
+            }
+          }
         }
         b.cooldown = 1.1 + Math.random() * 1.4;
       }
     }
-    this.aiTimer += dt;
-    if (this.aiTimer > 1.5) {
-      this.aiTimer = 0;
-      const alive = this.bots.filter((b) => b.hp > 0);
-      for (const b of alive) {
-        if (!b.armed) continue;
-        const enemy = alive.find(
-          (o) =>
-            o !== b &&
-            o.hp > 0 &&
-            o.mesh.position.distanceTo(b.mesh.position) < 34,
-        );
-        if (!enemy) continue;
-        const from = b.mesh.position.clone().add(new THREE.Vector3(0, 1.4, 0)),
-          to = enemy.mesh.position.clone().add(new THREE.Vector3(0, 1.4, 0));
-        if (this.visible(from, to)) {
-          this.tracer(from, to, '#ffe9a8');
-          const result = takeDamage(
-            enemy.hp,
-            enemy.shield,
-            9 + Math.random() * 12,
-          );
-          enemy.hp = result.health;
-          enemy.shield = result.shield;
-          if (enemy.hp <= 0) this.killBot(enemy);
-        }
-      }
+  }
+  moveBot(bot: Bot, angle: number, speed: number) {
+    const p = bot.mesh.position,
+      x = p.x,
+      z = p.z;
+    this.move(p, Math.sin(angle) * speed, Math.cos(angle) * speed);
+    if (Math.hypot(p.x - x, p.z - z) < speed * 0.1) {
+      const side = Math.floor(bot.seed * 10) % 2 === 0 ? 1 : -1;
+      this.move(
+        p,
+        Math.cos(angle) * speed * side,
+        -Math.sin(angle) * speed * side,
+      );
     }
+  }
+  chooseBotTarget(bot: Bot): number | null {
+    const p = bot.mesh.position;
+    const candidates = this.bots.flatMap((other, i) =>
+      other !== bot && other.hp > 0 && !other.dropping
+        ? [
+            {
+              id: i,
+              point: other.mesh.position
+                .clone()
+                .add(new THREE.Vector3(0, 1.3, 0)),
+            },
+          ]
+        : [],
+    );
+    if (this.state.health > 0 && !this.state.dropping)
+      candidates.push({ id: -1, point: this.position.clone().setY(1.3) });
+    candidates.sort(
+      (a, b) => p.distanceToSquared(a.point) - p.distanceToSquared(b.point),
+    );
+    const from = p.clone().add(new THREE.Vector3(0, 1.45, 0));
+    for (const candidate of candidates) {
+      if (p.distanceToSquared(candidate.point) > 47 * 47) break;
+      if (this.visible(from, candidate.point)) return candidate.id;
+    }
+    return null;
   }
   tick = (now: number) => this.updateFrame(now);
   updateFrame(now: number) {
@@ -1871,7 +1953,14 @@ export class BattleGame {
       this.state.healRemaining = this.state.healing
         ? Math.max(0, (this.state.healUntil - this.state.elapsed * 1000) / 1000)
         : 0;
-      if (!this.network) this.state.storm = stormRadius(this.state.elapsed);
+      if (!this.network)
+        this.state.zone = zoneAt(this.state.elapsed, this.zoneSeed);
+      this.state.storm = this.state.zone?.radius ?? this.state.storm;
+      this.storm.position.set(
+        this.state.zone?.x ?? 0,
+        24,
+        this.state.zone?.z ?? 0,
+      );
       this.storm.scale.set(this.state.storm, 1, this.state.storm);
       this.cooldown = Math.max(0, this.cooldown - dt);
       this.recoil = Math.max(0, this.recoil - dt * 0.65);
@@ -1976,8 +2065,11 @@ export class BattleGame {
       this.gun.scale.setScalar(1);
       this.flash.visible = this.recoil > 0.075;
       if (this.shooting) this.shoot();
-      this.state.outside =
-        Math.hypot(this.position.x, this.position.z) > this.state.storm;
+      this.state.outside = outsideZone(
+        this.position.x,
+        this.position.z,
+        this.state.zone ?? { x: 0, z: 0, radius: this.state.storm },
+      );
       if (this.state.outside && !this.network)
         this.damage(dt * (this.state.elapsed > 180 ? 11 : 5));
       if (this.state.phase === 'playing' && !this.network) this.updateBots(dt);
@@ -2170,48 +2262,6 @@ export class BattleGame {
           m.z > -1 && m.z < 1 && m.x > 2 && m.x < 98 && m.y > 5 && m.y < 90,
       );
     this.state.aiming = this.aiming;
-    this.state.dropLoot = [];
-    if (this.state.dropping && this.state.phase === 'playing') {
-      this.camera.updateMatrixWorld();
-      const visible = this.loot
-        .filter((l) => !l.used)
-        .map((l) => {
-          const point = l.mesh.position
-            .clone()
-            .add(new THREE.Vector3(0, 1, 0))
-            .project(this.camera);
-          return {
-            x: (point.x + 1) * 50,
-            y: (1 - point.y) * 50,
-            z: point.z,
-            kind: l.kind,
-            distance: Math.hypot(
-              l.mesh.position.x - this.position.x,
-              l.mesh.position.z - this.position.z,
-            ),
-          };
-        })
-        .filter(
-          (p) =>
-            p.z > -1 &&
-            p.z < 1 &&
-            p.x > 5 &&
-            p.x < 95 &&
-            p.y > 15 &&
-            p.y < 70 &&
-            p.distance < 90,
-        )
-        .sort((a, b) => a.distance - b.distance);
-      for (const item of visible) {
-        if (this.state.dropLoot.length >= 8) break;
-        if (
-          !this.state.dropLoot.some(
-            (p) => Math.abs(p.x - item.x) < 9 && Math.abs(p.y - item.y) < 7,
-          )
-        )
-          this.state.dropLoot.push(item);
-      }
-    }
     this.state.ammo = this.weaponAmmo[this.state.weapon] ?? 0;
     this.state.reserve = this.reserveAmmo[this.state.weapon] ?? 0;
     this.state.heading = ((((this.yaw * 180) / Math.PI) % 360) + 360) % 360;
@@ -2224,7 +2274,11 @@ export class BattleGame {
     if (watched) {
       this.state.heading =
         ((((watched.yaw * 180) / Math.PI) % 360) + 360) % 360;
-      this.state.outside = Math.hypot(watched.x, watched.z) > this.state.storm;
+      this.state.outside = outsideZone(
+        watched.x,
+        watched.z,
+        this.state.zone ?? { x: 0, z: 0, radius: this.state.storm },
+      );
     }
     this.state.bots = this.bots
       .filter((b) => b.hp > 0)
@@ -2387,7 +2441,6 @@ export class BattleGame {
     }
     this.state.dropping = me.dropping && me.health > 0;
     this.state.altitude = Math.max(0, me.y - 1.7);
-    const wasHealing = this.state.healing;
     this.state.medkits = me.medkits ?? 0;
     this.state.cells = me.cells ?? 0;
     this.state.healing = me.healing ?? null;
@@ -2395,21 +2448,18 @@ export class BattleGame {
     this.state.healRemaining = me.healing
       ? Math.max(0, (me.healUntil - room.now) / 1000)
       : 0;
-    if (
-      wasHealing &&
-      !me.healing &&
-      (me.health < this.state.health || me.shield < this.state.shield)
-    )
-      this.notice('Healing interrupted. Item saved.');
     this.state.health = me.health;
     this.state.shield = me.shield;
     this.state.kills = me.kills;
     this.state.alive = room.players.filter((p) => p.health > 0).length;
     this.state.rank = me.rank || this.state.alive;
     this.state.elapsed = Math.max(0, (room.now - room.startAt) / 1000);
-    this.state.storm = room.storm;
-    this.state.outside = Math.hypot(me.x, me.z) > room.storm;
-    this.storm.scale.set(room.storm, 1, room.storm);
+    this.state.zone =
+      room.zone ?? zoneAt(this.state.elapsed, `${room.code}:${room.round}`);
+    this.state.storm = this.state.zone.radius;
+    this.state.outside = outsideZone(me.x, me.z, this.state.zone);
+    this.storm.position.set(this.state.zone.x, 24, this.state.zone.z);
+    this.storm.scale.set(this.state.storm, 1, this.state.storm);
     const inventoryChanged = this.state.owned.some(
       (has, i) => has !== me.owned[i],
     );

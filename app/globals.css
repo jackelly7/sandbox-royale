@@ -675,40 +675,32 @@ h1 > span {
   position: absolute;
   background: #ffffffdf;
 }
+.crosshair > span:nth-child(1),
+.crosshair > span:nth-child(2) {
+  width: 1px;
+  height: 4px;
+  left: 11.5px;
+}
 .crosshair > span:nth-child(1) {
-  width: 2px;
-  height: 6px;
   top: 0;
-  left: 11px;
 }
 .crosshair > span:nth-child(2) {
-  width: 2px;
-  height: 6px;
   bottom: 0;
-  left: 11px;
+}
+.crosshair > span:nth-child(3),
+.crosshair > span:nth-child(4) {
+  height: 1px;
+  width: 4px;
+  top: 11.5px;
 }
 .crosshair > span:nth-child(3) {
-  height: 2px;
-  width: 6px;
   left: 0;
-  top: 11px;
 }
 .crosshair > span:nth-child(4) {
-  height: 2px;
-  width: 6px;
   right: 0;
-  top: 11px;
 }
 .crosshair.confirmed > span {
-  background: var(--coral);
-}
-.crosshair b {
-  position: absolute;
-  font-size: 40px;
-  left: -2px;
-  top: -18px;
-  color: #ffeab5;
-  font-weight: 300;
+  background: #ffc675;
 }
 .damage-flash {
   position: absolute;
@@ -2587,31 +2579,7 @@ kbd {
   color: #aecbcb;
   font-size: 12px;
 }
-.aerial-loot {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-}
-.aerial-loot > div {
-  position: absolute;
-  display: grid;
-  text-align: center;
-  transform: translate(-50%, -50%);
-  background: #102d3ee8;
-  border: 1px solid;
-  border-bottom-width: 3px;
-  padding: 4px 9px;
-  box-shadow: 0 3px 8px #0004;
-  border-radius: 3px;
-}
-.aerial-loot span {
-  font-size: 12px;
-  font-weight: 700;
-}
-.aerial-loot small {
-  color: #c8dce1;
-  font-size: 12px;
-}
+
 .death-overlay {
   position: absolute;
   z-index: 8;
@@ -2879,21 +2847,11 @@ kbd {
 /* A clear sightline: reticles stay centered while the weapon sits below them. */
 .crosshair {
   z-index: 2;
-  filter: drop-shadow(0 0 2px #000) drop-shadow(0 1px 1px #000);
+  filter: drop-shadow(0 1px 1px #000);
 }
 .crosshair > span {
   background: #fff;
-  box-shadow: 0 0 0 1px #000b;
-}
-.aim-dot {
-  position: absolute;
-  left: 10px;
-  top: 10px;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 0 0 1px #000;
+  box-shadow: none;
 }
 .crosshair.ads {
   transform: translate(-50%, -50%) scale(0.8);
@@ -2904,10 +2862,18 @@ kbd {
   inset: -10px;
   border: 1px solid #fffe;
   border-radius: 50%;
-  box-shadow: 0 0 0 1px #0008;
+  box-shadow: none;
 }
-.crosshair.scoped > span,
-.crosshair.scoped .aim-dot {
+.crosshair.shotgun-reticle > span {
+  display: none;
+}
+.crosshair.shotgun-reticle.confirmed::before {
+  border-color: #ffc675;
+}
+.crosshair.sniper-hip:not(.scoped) {
+  transform: translate(-50%, -50%) scale(1.65);
+}
+.crosshair.scoped > span {
   display: none;
 }
 .sniper-reticle {
@@ -2926,30 +2892,32 @@ kbd {
 .scope-horizontal,
 .scope-vertical {
   position: absolute;
-  background: #ffffffdf;
-  box-shadow: 0 0 0 1px #0008;
 }
 .scope-horizontal {
+  background: linear-gradient(
+    to right,
+    #ffffffa0 calc(50% - 7px),
+    transparent calc(50% - 7px),
+    transparent calc(50% + 7px),
+    #ffffffa0 calc(50% + 7px)
+  );
   left: 0;
   right: 0;
   top: calc(50% - 0.5px);
   height: 1px;
 }
 .scope-vertical {
+  background: linear-gradient(
+    to bottom,
+    #ffffffa0 calc(50% - 7px),
+    transparent calc(50% - 7px),
+    transparent calc(50% + 7px),
+    #ffffffa0 calc(50% + 7px)
+  );
   top: 0;
   bottom: 0;
   left: calc(50% - 0.5px);
   width: 1px;
-}
-.sniper-reticle > i {
-  position: absolute;
-  top: calc(50% - 2px);
-  left: calc(50% - 2px);
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: #ff6262;
-  box-shadow: 0 0 0 2px #141414;
 }
 .sniper-reticle small {
   position: absolute;
@@ -3374,4 +3342,9 @@ kbd {
   .footstep-direction > i {
     left: 36px;
   }
+}
+
+.legend-next {
+  border: 1px dashed white;
+  background: transparent;
 }

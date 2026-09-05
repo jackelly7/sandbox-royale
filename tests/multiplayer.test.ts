@@ -277,7 +277,7 @@ void test('healing takes time, caps at 100, consumes once, and rejects empty or 
   applyCommand(room, p.id, { type: 'heal', item: 'medkit' }, at + 11900);
   assert.equal(p.healing, null);
 });
-void test('incoming damage interrupts recovery and reports aggregated shield damage', () => {
+void test('incoming damage preserves recovery and reports aggregated shield damage', () => {
   const room = started(),
     [p, target] = room.players;
   Object.assign(p, {
@@ -300,7 +300,8 @@ void test('incoming damage interrupts recovery and reports aggregated shield dam
   });
   applyCommand(room, target.id, { type: 'heal', item: 'medkit' }, at + 5100);
   applyCommand(room, p.id, { type: 'shoot', pose: p, aiming: true }, at + 5200);
-  assert.equal(target.healing, null);
+  assert.equal(target.healing, 'medkit');
+  assert.equal(target.healUntil, at + 9100);
   assert.equal(target.medkits, 1);
   const hits = room.events.filter((e) => e.type === 'hit');
   assert.equal(
@@ -316,16 +317,13 @@ void test('incoming damage interrupts recovery and reports aggregated shield dam
     30,
     'One shotgun blast no longer instantly finishes this target',
   );
+  advance(room, at + 9100);
+  assert.equal(target.health, 100);
+  assert.equal(target.medkits, 0);
+  assert.equal(target.healing, null);
 });
-void test('cancel, firing, reload, switching, storm and death preserve unused recovery items', () => {
-  for (const action of [
-    'cancel',
-    'shoot',
-    'reload',
-    'switch',
-    'storm',
-    'leave',
-  ]) {
+void test('cancel, firing, reload, switching and death preserve unused recovery items', () => {
+  for (const action of ['cancel', 'shoot', 'reload', 'switch', 'leave']) {
     const room = started(),
       p = room.players[0];
     Object.assign(p, {
@@ -355,10 +353,6 @@ void test('cancel, firing, reload, switching, storm and death preserve unused re
         { type: 'pose', pose: { ...p, weapon: 1 } },
         at + 5200,
       );
-    if (action === 'storm') {
-      p.x = 109;
-      advance(room, at + 5200);
-    }
     if (action === 'leave')
       applyCommand(room, p.id, { type: 'leave' }, at + 5200);
     assert.equal(p.healing, null, action);
@@ -446,4 +440,61 @@ void test('killer identity remains available after transient elimination events 
   assert.equal(later.events.length, 0);
   assert.equal(later.players[1].killedBy, p.id);
   assert.equal(later.players[1].diedAt, at + 5100);
+});
+
+void test('storm damage allows healing to complete while lethal damage cancels it', () => {
+  const room = started(),
+    p = room.players[0];
+  Object.assign(p, { x: 109, z: 0, health: 50, shield: 0, medkits: 2 });
+  applyCommand(room, p.id, { type: 'heal', item: 'medkit' }, at + 5100);
+  advance(room, at + 5200);
+  assert.equal(p.healing, 'medkit');
+  advance(room, at + 9100);
+  assert.ok(p.health > 90);
+  assert.equal(p.medkits, 1);
+  p.health = 1;
+  applyCommand(room, p.id, { type: 'heal', item: 'medkit' }, at + 9200);
+  advance(room, at + 9600);
+  assert.equal(p.health, 0);
+  assert.equal(p.healing, null);
+  assert.equal(p.medkits, 1);
+});
+
+void test('server shotgun range is short while the same sightline permits rifle hits', () => {
+  for (const [weapon, distance, shouldHit] of [
+    [1, 7, true],
+    [1, 35, false],
+    [0, 35, true],
+  ] as const) {
+    const room = started(),
+      [p, target] = room.players;
+    Object.assign(p, {
+      x: 0,
+      z: 5,
+      y: 1.3,
+      yaw: -Math.PI / 2,
+      pitch: 0,
+      weapon,
+      owned: [true, true, false],
+      ammo: [30, 6, 0],
+    });
+    Object.assign(target, {
+      x: distance,
+      z: 5,
+      y: 1.7,
+      health: 100,
+      shield: 50,
+    });
+    applyCommand(
+      room,
+      p.id,
+      { type: 'shoot', pose: p, aiming: true },
+      at + 5100,
+    );
+    assert.equal(
+      target.shield < 50,
+      shouldHit,
+      `weapon ${weapon}, range ${distance}`,
+    );
+  }
 });

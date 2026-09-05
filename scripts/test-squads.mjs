@@ -113,6 +113,8 @@ try {
   console.log(
     'PASS active directory, four-player Duos, and private teammate pings',
   );
+  assert.ok(host.room.zone?.next.radius < host.room.storm);
+  assert.equal(host.room.zone.stage, 'waiting');
   await walk(host, 5, 62);
   host.send({ type: 'pickup', index: 19 });
   await host.until(() => mine(host).owned[0]);
@@ -122,8 +124,8 @@ try {
         [12, -67],
         [12, -44],
         [12, -35],
-        [0, -35],
-        [0, 58],
+        [6, -35],
+        [6, 58],
         [player === b ? 17 : 15, 58],
       ])
         await walk(player, x, z);
