@@ -55,6 +55,7 @@ import type {
   RoomSession,
   ConnectionStatus,
 } from '@/lib/game/multiplayer';
+import { GUN_LADDER } from '@/lib/game/gun-game';
 import { WEAPONS, SUPPLIES, RARITIES } from '@/lib/game/rules';
 import { zoneAt } from '@/lib/game/zones';
 
@@ -117,6 +118,7 @@ const controls = [
   ['E', 'Collect / revive teammate'],
   ['G / Middle click', 'Ping enemy, loot, or location'],
   ['Q / F', 'Use medkit / shield cell'],
+  ['H', 'Throw smoke grenade'],
   ['X', 'Cancel healing / revive'],
   ['[ / ]', 'Switch player while spectating'],
   ['1  2  3 / WHEEL', 'Switch collected weapons'],
@@ -337,6 +339,24 @@ function IslandMap({
               aria-label="Next safe circle"
             />
           )}
+          {worldState.supply && (
+            <g
+              transform={`translate(${worldState.supply.x / ARENA_SCALE} ${worldState.supply.z / ARENA_SCALE})`}
+              aria-label="Supply drop"
+            >
+              <path
+                d="M0 -5L5 0L0 5L-5 0Z"
+                fill="#e1a1ff"
+                stroke="#241332"
+                strokeWidth="1.2"
+              />
+              {large && (
+                <text y="-8" textAnchor="middle" fill="#fff" fontSize="4">
+                  SUPPLY DROP
+                </text>
+              )}
+            </g>
+          )}
           {state.bots
             .filter((b) => Math.hypot(b.x - state.x, b.z - state.z) < 30)
             .map((b, i) => (
@@ -510,8 +530,11 @@ export default function Home() {
   };
   const playing = state.phase === 'playing',
     lobby = state.phase === 'lobby',
-    ended = state.phase === 'won' || state.phase === 'lost',
+    ended =
+      (state.phase === 'won' || state.phase === 'lost') &&
+      !(room?.mode === 'gun-game' && room.phase === 'playing'),
     spectating = state.phase === 'spectating';
+  const gunGame = room?.mode === 'gun-game';
   const ownPlayer = room?.players.find((p) => p.id === session?.playerId);
   const teammate =
     room?.mode === 'duos'
@@ -611,7 +634,7 @@ export default function Home() {
                 onClick={() => setPanel('friends')}
               >
                 <Users size={17} />
-                {session ? 'OPEN FRIEND ROOM' : 'PLAY WITH FRIENDS'}
+                {session ? 'OPEN FRIEND ROOM' : 'FRIENDS / GUN GAME'}
                 <ArrowRight size={17} />
               </button>
               <div className="match-facts">
@@ -767,7 +790,8 @@ export default function Home() {
           <div className="match-status">
             <span>
               <Users size={17} />
-              <b>{state.alive}</b> ALIVE
+              <b>{gunGame ? room?.players.length : state.alive}</b>{' '}
+              {gunGame ? 'PLAYERS' : 'ALIVE'}
             </span>
             <span>
               <Skull size={17} />
@@ -786,9 +810,11 @@ export default function Home() {
             <div className={`storm-timer ${state.outside ? 'danger' : ''}`}>
               <span className="storm-symbol">◉</span>
               <span>
-                {zone.stage === 'final'
-                  ? 'FINAL CIRCLE'
-                  : `ZONE ${zone.phase} · ${zone.stage === 'waiting' ? 'CLOSES IN' : 'CLOSING'}`}
+                {gunGame
+                  ? 'GUN GAME ARENA'
+                  : zone.stage === 'final'
+                    ? 'FINAL CIRCLE'
+                    : `ZONE ${zone.phase} · ${zone.stage === 'waiting' ? 'CLOSES IN' : 'CLOSING'}`}
               </span>
               <b>{zone.stage === 'final' ? '' : clock}</b>
             </div>
@@ -816,7 +842,7 @@ export default function Home() {
             )}
           {playing && !state.onBus && !state.mapOpen && (
             <div
-              className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : state.weapon === 2 ? 'sniper-hip' : state.weapon === 0 ? 'rifle-hip' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
+              className={`crosshair ${state.aiming ? 'ads' : ''} ${state.weapon === 1 ? 'shotgun-reticle' : state.weapon === 2 ? 'sniper-hip' : [0, 4, 5].includes(state.weapon) ? 'rifle-hip' : ''} ${state.aiming && state.weapon === 2 ? 'scoped' : ''} ${state.hit > 0 ? 'confirmed' : ''} ${state.eliminationPulse > 0 ? 'elimination-confirmed' : ''}`}
             >
               <span />
               <span />
@@ -1088,6 +1114,20 @@ export default function Home() {
               </div>
             </>
           )}
+          {state.smokeObscured && (
+            <div className="smoke-overlay" aria-hidden="true" />
+          )}
+          {gunGame &&
+            room?.phase === 'playing' &&
+            (state.respawnRemaining ?? 0) > 0 && (
+              <div className="gun-respawn">
+                BACK IN THE SANDBOX IN {Math.ceil(state.respawnRemaining!)}
+                <small>
+                  Weapon progress saved ·{' '}
+                  {WEAPONS[GUN_LADDER[Math.min(state.gunStage ?? 0, 7)]].name}
+                </small>
+              </div>
+            )}
           {state.phase === 'dying' && (
             <section className="death-overlay" aria-label="Elimination">
               <Skull size={36} />
@@ -1098,13 +1138,15 @@ export default function Home() {
                 #{state.rank} · {state.kills} eliminations
               </p>
               <small>
-                {session
-                  ? 'Switching to spectator view...'
-                  : 'Your run has ended.'}
+                {gunGame
+                  ? 'Respawning shortly. Weapon progress saved.'
+                  : session
+                    ? 'Switching to spectator view...'
+                    : 'Your run has ended.'}
               </small>
             </section>
           )}
-          {playing && state.health <= 30 && state.health > 0 && (
+          {playing && !gunGame && state.health <= 30 && state.health > 0 && (
             <div className="low-health">
               <Heart size={16} /> LOW HEALTH ·{' '}
               {state.medkits > 0 ? 'Q TO HEAL' : 'FIND A MEDKIT'}
@@ -1221,73 +1263,127 @@ export default function Home() {
                   <b>{Math.ceil(state.health)}</b>
                 </div>
                 <div className="player-label">
-                  YOU <span>{session ? 'BATTLE ROYALE' : 'SOLO'}</span>
+                  YOU{' '}
+                  <span>
+                    {gunGame ? 'GUN GAME' : session ? 'BATTLE ROYALE' : 'SOLO'}
+                  </span>
                 </div>
               </div>
               <div className="loadout">
-                <div className="supply-slots">
-                  <button
-                    disabled={
-                      !playing ||
-                      state.medkits < 1 ||
-                      state.health >= 100 ||
-                      !!state.healing
-                    }
-                    onClick={() => game.current?.heal('medkit')}
-                    aria-label={`Use medkit, ${state.medkits} available`}
-                  >
-                    <kbd>Q</kbd>
-                    <Heart size={17} />
-                    <span>
-                      MEDKIT <b>{state.medkits}/3</b>
-                    </span>
-                    <small>+75 HP · 4s</small>
-                  </button>
-                  <button
-                    disabled={
-                      !playing ||
-                      state.cells < 1 ||
-                      state.shield >= 100 ||
-                      !!state.healing
-                    }
-                    onClick={() => game.current?.heal('shield')}
-                    aria-label={`Use shield cell, ${state.cells} available`}
-                  >
-                    <kbd>F</kbd>
-                    <Shield size={17} />
-                    <span>
-                      SHIELD <b>{state.cells}/3</b>
-                    </span>
-                    <small>+50 · 2.5s</small>
-                  </button>
-                </div>
-                <div className="weapon-slots">
-                  {WEAPONS.map((w, i) => (
-                    <button
-                      key={w.name}
-                      className={`weapon-slot ${state.weapon === i ? 'selected' : ''} ${!state.owned[i] ? 'unowned' : ''}`}
-                      disabled={!state.owned[i]}
-                      aria-label={`${i + 1} ${w.name}${!state.owned[i] ? ', find this weapon' : ''}`}
-                      style={
-                        {
-                          '--weapon-color':
-                            RARITIES[state.tiers?.[i] ?? 0].color,
-                        } as React.CSSProperties
+                {gunGame ? (
+                  <div className="gun-progress">
+                    <strong>
+                      WEAPON {Math.min((state.gunStage ?? 0) + 1, 8)} / 8 ·{' '}
+                      {
+                        WEAPONS[GUN_LADDER[Math.min(state.gunStage ?? 0, 7)]]
+                          .name
                       }
-                      onClick={() => game.current?.selectWeapon(i)}
+                    </strong>
+                    {(ownPlayer?.protectedUntil ?? 0) > (room?.now ?? 0) && (
+                      <small>SPAWN PROTECTION · ENDS WHEN YOU ATTACK</small>
+                    )}
+                    <div className="gun-steps">
+                      {GUN_LADDER.map((w, i) => (
+                        <span
+                          key={w}
+                          title={WEAPONS[w].name}
+                          className={
+                            i < (state.gunStage ?? 0)
+                              ? 'done'
+                              : i === (state.gunStage ?? 0)
+                                ? 'current'
+                                : ''
+                          }
+                        />
+                      ))}
+                    </div>
+                    <small>
+                      {(state.gunStage ?? 0) < 7
+                        ? `NEXT: ${WEAPONS[GUN_LADDER[(state.gunStage ?? 0) + 1]].name}`
+                        : 'FINAL WEAPON · NEXT ELIMINATION WINS'}
+                    </small>
+                  </div>
+                ) : (
+                  <div className="supply-slots">
+                    <button
+                      disabled={
+                        !playing ||
+                        state.medkits < 1 ||
+                        state.health >= 100 ||
+                        !!state.healing
+                      }
+                      onClick={() => game.current?.heal('medkit')}
+                      aria-label={`Use medkit, ${state.medkits} available`}
                     >
-                      <kbd>{i + 1}</kbd>
-                      <Crosshair size={22} />
+                      <kbd>Q</kbd>
+                      <Heart size={17} />
                       <span>
-                        {w.short}
-                        <small>
-                          {state.owned[i]
-                            ? `${RARITIES[state.tiers?.[i] ?? 0].name} ${'◆'.repeat((state.tiers?.[i] ?? 0) + 1)}`
-                            : 'FIND'}
-                        </small>
+                        MEDKIT <b>{state.medkits}/3</b>
                       </span>
+                      <small>+75 HP · 4s</small>
                     </button>
-                  ))}
+                    <button
+                      disabled={
+                        !playing ||
+                        state.cells < 1 ||
+                        state.shield >= 100 ||
+                        !!state.healing
+                      }
+                      onClick={() => game.current?.heal('shield')}
+                      aria-label={`Use shield cell, ${state.cells} available`}
+                    >
+                      <kbd>F</kbd>
+                      <Shield size={17} />
+                      <span>
+                        SHIELD <b>{state.cells}/3</b>
+                      </span>
+                      <small>+50 · 2.5s</small>
+                    </button>
+                    <button
+                      disabled={
+                        !playing || !(state.smokes ?? 0) || state.dropping
+                      }
+                      onClick={() => game.current?.throwSmoke()}
+                      aria-label="Throw smoke grenade"
+                    >
+                      <kbd>H</kbd>
+                      <span>
+                        SMOKE <b>{state.smokes ?? 0}/2</b>
+                      </span>
+                      <small>10s cover</small>
+                    </button>
+                  </div>
+                )}
+                <div className="weapon-slots">
+                  {WEAPONS.map(
+                    (w, i) =>
+                      (gunGame ? i === state.weapon : i < 3) && (
+                        <button
+                          key={w.name}
+                          className={`weapon-slot ${state.weapon === i ? 'selected' : ''} ${!state.owned[i] ? 'unowned' : ''}`}
+                          disabled={!state.owned[i]}
+                          aria-label={`${gunGame ? 'Current weapon' : i + 1} ${w.name}${!state.owned[i] ? ', find this weapon' : ''}`}
+                          style={
+                            {
+                              '--weapon-color':
+                                RARITIES[state.tiers?.[i] ?? 0].color,
+                            } as React.CSSProperties
+                          }
+                          onClick={() => game.current?.selectWeapon(i)}
+                        >
+                          <kbd>{gunGame ? '◆' : i + 1}</kbd>
+                          <Crosshair size={22} />
+                          <span>
+                            {w.short}
+                            <small>
+                              {state.owned[i]
+                                ? `${RARITIES[state.tiers?.[i] ?? 0].name} ${'◆'.repeat((state.tiers?.[i] ?? 0) + 1)}`
+                                : 'FIND'}
+                            </small>
+                          </span>
+                        </button>
+                      ),
+                  )}
                 </div>
               </div>
               <div className="ammo-block">
@@ -1295,7 +1391,7 @@ export default function Home() {
                   {state.reloading
                     ? 'RELOADING'
                     : state.weapon >= 0
-                      ? `${RARITIES[state.tiers?.[state.weapon] ?? 0].name} · ${WEAPONS[state.weapon].short}`
+                      ? `${gunGame ? 'GUN GAME' : RARITIES[state.tiers?.[state.weapon] ?? 0].name} · ${WEAPONS[state.weapon].short}`
                       : 'FISTS'}
                 </span>
                 <div>
@@ -1304,7 +1400,7 @@ export default function Home() {
                       ? '—'
                       : String(state.ammo).padStart(2, '0')}
                   </b>
-                  <span>/ {state.reserve}</span>
+                  <span>/ {gunGame ? '∞' : state.reserve}</span>
                 </div>
                 <small>
                   {state.weapon < 0 ? (
@@ -1315,7 +1411,8 @@ export default function Home() {
                     )
                   ) : (
                     <>
-                      <kbd>R</kbd> RELOAD · <kbd>B</kbd> MELEE · 1–3 / WHEEL
+                      <kbd>R</kbd> RELOAD · <kbd>B</kbd> MELEE{' '}
+                      {gunGame ? '' : '· 1–3 / WHEEL'}
                     </>
                   )}
                 </small>
@@ -1498,9 +1595,11 @@ export default function Home() {
             </div>
             <h2>
               {state.phase === 'won'
-                ? room?.mode === 'duos'
-                  ? 'LAST DUO IN\nTHE SANDBOX.'
-                  : 'LAST ONE IN\nTHE SANDBOX.'
+                ? gunGame
+                  ? 'GUN GAME\nCHAMPION.'
+                  : room?.mode === 'duos'
+                    ? 'LAST DUO IN\nTHE SANDBOX.'
+                    : 'LAST ONE IN\nTHE SANDBOX.'
                 : 'BACK TO THE\nSANDBOX?'}
             </h2>
             <p className="result-context">
@@ -1531,7 +1630,7 @@ export default function Home() {
                     .toString()
                     .padStart(2, '0')}
                 </b>
-                <span>SURVIVED</span>
+                <span>{gunGame ? 'MATCH TIME' : 'SURVIVED'}</span>
               </div>
             </div>
             {session && room?.phase === 'playing' && state.phase === 'lost' && (

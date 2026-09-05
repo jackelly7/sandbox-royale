@@ -70,6 +70,11 @@ export class WeaponAudio {
       [0.13, 0.09, 2600, 140],
       [0.26, 0.13, 1500, 75],
       [0.36, 0.12, 4200, 105],
+      [0.1, 0.075, 3200, 180],
+      [0.08, 0.065, 3800, 165],
+      [0.2, 0.11, 1900, 90],
+      [0.23, 0.1, 3300, 125],
+      [0.25, 0.11, 2200, 80],
     ];
     const [duration, volume, frequency, low] = presets[index];
     const attenuation = Math.max(0, 1 - distance / 90) ** 2;

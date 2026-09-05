@@ -4,7 +4,12 @@ import { modelKit } from './model-kit.ts';
 function buildSupplyModel(kind: number) {
   const k = modelKit(kind === 3 ? 'Shield cell' : 'Medkit'),
     { box, tube } = k;
-  if (kind >= 5) {
+  if (kind === 8) {
+    box(0.3, 0.48, 0.3, '#597e81');
+    box(0.32, 0.08, 0.32, '#c8edf0', 0, 0.1, 0);
+    box(0.15, 0.12, 0.12, '#25383b', 0, 0.3, 0);
+    box(0.06, 0.12, 0.25, '#d4d6bb', 0.1, 0.33, 0.05);
+  } else if (kind >= 5) {
     const t = kind - 5,
       color = AMMO_TYPES[t].color;
     box(0.55, 0.23, 0.4, '#38434b', 0, 0, 0);

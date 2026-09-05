@@ -20,6 +20,88 @@ function buildWeaponModel(
     black = '#142026',
     pale = '#e6e1cb';
   const accent = RARITIES[rarity].color;
+  if (index >= 3) {
+    const accent = WEAPONS[index].color;
+    if (index === 3 || index === 7) {
+      box(0.16, 0.14, index === 7 ? 0.5 : 0.38, accent, 0, 0.04, -0.08, 0.025);
+      box(0.12, 0.27, 0.15, dark, 0, -0.13, 0.1, 0.02).rotation.x = -0.2;
+      tube(
+        0.032,
+        index === 7 ? 0.28 : 0.12,
+        black,
+        0,
+        0.045,
+        index === 7 ? -0.45 : -0.31,
+      );
+      if (index === 7 && detail === 'world') {
+        const drum = tube(0.095, 0.18, edge, 0, 0, -0.02, 8);
+        drum.rotation.x = 0;
+      }
+      box(0.03, 0.035, 0.04, pale, 0, 0.13, -0.23);
+    } else {
+      const lmg = index === 5,
+        dmr = index === 6;
+      box(
+        lmg ? 0.25 : 0.16,
+        0.2,
+        dmr ? 0.6 : lmg ? 0.6 : 0.37,
+        accent,
+        0,
+        0,
+        0,
+        0.03,
+      );
+      tube(
+        0.03,
+        dmr ? 0.65 : lmg ? 0.5 : 0.23,
+        edge,
+        0,
+        0.04,
+        dmr ? -0.58 : lmg ? -0.5 : -0.3,
+      );
+      box(0.12, 0.22, 0.13, black, 0, -0.18, 0.1);
+      if (detail === 'world')
+        box(
+          lmg ? 0.3 : 0.09,
+          lmg ? 0.23 : 0.29,
+          lmg ? 0.25 : 0.13,
+          dark,
+          0,
+          -0.2,
+          -0.12,
+        );
+      box(0.12, 0.13, dmr ? 0.32 : 0.23, edge, 0, -0.03, dmr ? 0.48 : 0.35);
+      if (lmg)
+        for (const x of [-1, 1])
+          box(0.025, 0.27, 0.025, black, x * 0.1, -0.16, -0.55).rotation.z =
+            x * 0.4;
+      if (dmr) {
+        box(0.07, 0.12, 0.12, dark, 0, 0.15, -0.02);
+        box(0.08, 0.05, 0.04, pale, 0, 0.24, -0.02);
+      }
+    }
+    const root = k.finish();
+    if (detail === 'held') {
+      const action = modelKit('Action');
+      if (index === 7)
+        action.tube(0.095, 0.18, edge, 0, 0, -0.02, 8).rotation.x = 0;
+      else if (index === 3) action.box(0.1, 0.2, 0.12, black, 0, -0.2, 0.1);
+      else
+        action.box(
+          index === 5 ? 0.3 : 0.09,
+          index === 5 ? 0.23 : 0.29,
+          index === 5 ? 0.25 : 0.13,
+          dark,
+          0,
+          -0.2,
+          -0.12,
+        );
+      root.add(action.finish());
+    }
+    root.userData.detail = detail;
+    root.userData.rarity = rarity;
+    return root;
+  }
   if (index === 0) {
     box(0.18, 0.19, 0.5, dark, 0, 0, 0.02, 0.035);
     box(0.185, 0.105, 0.32, accent, 0, 0.08, -0.22, 0.025);

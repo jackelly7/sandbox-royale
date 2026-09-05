@@ -1,3 +1,4 @@
+import type { Smoke, SupplyDrop } from './battlefield.ts';
 import type { ChestState } from './chests.ts';
 import type { WorldDrop } from './loot.ts';
 import type { Point } from './movement.ts';
@@ -24,6 +25,11 @@ export type Player = PlayerPose &
     connected: boolean;
     ready?: boolean;
     pickedUpAt?: number;
+    smokes?: number;
+    gunStage?: number;
+    respawnAt?: number;
+    protectedUntil?: number;
+    spawnedAt?: number;
     dropping: boolean;
     onBus?: boolean;
     bot?: boolean;
@@ -64,14 +70,18 @@ export type RoomSnapshot = {
   drops?: WorldDrop[];
   chests?: ChestState[];
   events: GameEvent[];
-  mode?: 'solo' | 'duos';
+  mode?: 'solo' | 'duos' | 'gun-game';
   winningTeam?: number | null;
   botCount?: number;
   busDuration?: number;
+  smokes?: Smoke[];
+  supply?: SupplyDrop;
 };
 export type GameEvent = {
   id: string;
   type:
+    | 'smoke'
+    | 'supply'
     | 'chest'
     | 'shot'
     | 'melee'
@@ -88,6 +98,7 @@ export type GameEvent = {
   at: number;
   amount?: number;
   ammoKind?: number;
+  weapon?: number;
   shieldDamage?: number;
   shieldBreak?: boolean;
   headshot?: boolean;
@@ -99,6 +110,8 @@ export type Command =
   | { type: 'shoot'; pose: PlayerPose; aiming: boolean }
   | { type: 'mantle'; pose: PlayerPose }
   | { type: 'melee'; pose: PlayerPose }
+  | { type: 'smoke'; pose: PlayerPose }
+  | { type: 'supply' }
   | { type: 'reload' }
   | { type: 'heal'; item: SupplyKind }
   | { type: 'cancelHeal' }
@@ -111,7 +124,7 @@ export type Command =
   | { type: 'rematch' }
   | { type: 'leave' }
   | { type: 'ping' }
-  | { type: 'mode'; mode: 'solo' | 'duos' }
+  | { type: 'mode'; mode: 'solo' | 'duos' | 'gun-game' }
   | { type: 'team'; team: number }
   | { type: 'revive'; target: string }
   | { type: 'cancelRevive' }
@@ -123,7 +136,7 @@ export type Command =
 // Room controls and squad actions are validated by the authoritative server.
 export type RoomSession = { code: string; playerId: string; token: string };
 export type ActiveRoom = {
-  mode: 'solo' | 'duos';
+  mode: 'solo' | 'duos' | 'gun-game';
   code: string;
   hostName: string;
   phase: RoomSnapshot['phase'];

@@ -45,7 +45,73 @@ export const WEAPONS = [
     pellets: 1,
     color: '#dcadff',
   },
+  {
+    name: 'Pocket Pistol',
+    short: 'PISTOL',
+    capacity: 12,
+    damage: 24,
+    interval: 0.26,
+    reload: 1.2,
+    spread: 0.035,
+    aimedSpread: 0.004,
+    range: 65,
+    pellets: 1,
+    color: '#ffe18b',
+  },
+  {
+    name: 'Zip SMG',
+    short: 'SMG',
+    capacity: 32,
+    damage: 11,
+    interval: 0.09,
+    reload: 1.45,
+    spread: 0.075,
+    aimedSpread: 0.018,
+    range: 55,
+    pellets: 1,
+    color: '#93e9ff',
+  },
+  {
+    name: 'Bulwark LMG',
+    short: 'LMG',
+    capacity: 60,
+    damage: 17,
+    interval: 0.16,
+    reload: 2.7,
+    spread: 0.085,
+    aimedSpread: 0.012,
+    range: 95,
+    pellets: 1,
+    color: '#f4b882',
+  },
+  {
+    name: 'Scout Marksman',
+    short: 'MARKSMAN',
+    capacity: 10,
+    damage: 38,
+    interval: 0.48,
+    reload: 1.9,
+    spread: 0.06,
+    aimedSpread: 0.0015,
+    range: 145,
+    pellets: 1,
+    color: '#a9e69b',
+  },
+  {
+    name: 'Dust Devil',
+    short: 'REVOLVER',
+    capacity: 6,
+    damage: 45,
+    interval: 0.55,
+    reload: 2.1,
+    spread: 0.05,
+    aimedSpread: 0.002,
+    range: 75,
+    pellets: 1,
+    color: '#ffa0b7',
+  },
 ];
+export const automaticWeapon = (index: number) => [0, 4, 5].includes(index);
 export function cycleWeapon(
   current: number,
   owned: boolean[],
@@ -172,6 +238,10 @@ export function weaponDamage(weapon: number, distance: number, rarity = 0) {
       ? Math.max(0, 1 - Math.max(0, distance - 8) / 16)
       : weapon === 0
         ? Math.max(0.2, 1 - Math.max(0, distance - 35) / 75)
-        : 1;
+        : weapon === 4
+          ? Math.max(0.3, 1 - Math.max(0, distance - 16) / 45)
+          : weapon === 3 || weapon === 7
+            ? Math.max(0.45, 1 - Math.max(0, distance - 25) / 60)
+            : 1;
   return w.damage * falloff * (RARITIES[rarity]?.power ?? 1);
 }

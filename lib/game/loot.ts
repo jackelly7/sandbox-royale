@@ -36,6 +36,7 @@ export function floorRarity(index: number) {
   return roll < 60 ? 0 : roll < 85 ? 1 : roll < 97 ? 2 : 3;
 }
 export function lootColor(kind: number, rarity = 0) {
+  if (kind === 8) return '#c8edf0';
   if (isAmmo(kind)) return AMMO_TYPES[kind - 5].color;
   return kind < 3 ? RARITIES[rarity].color : kind === 3 ? '#78dfee' : '#ff7474';
 }
@@ -47,6 +48,7 @@ type Inventory = {
   weapon: number;
   medkits: number;
   cells: number;
+  smokes?: number;
 };
 export function eliminationDrops(
   inv: Inventory,
@@ -86,6 +88,15 @@ export function eliminationDrops(
       kind: 4,
       rarity: 0,
       amount: inv.medkits,
+      used: false,
+    });
+  if (inv.smokes)
+    drops.push({
+      x: x + 2,
+      z: z + 2,
+      kind: 8,
+      rarity: 0,
+      amount: inv.smokes,
       used: false,
     });
   return drops;

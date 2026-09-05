@@ -1,3 +1,4 @@
+import { smokeLoot } from '../lib/game/battlefield.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -59,7 +60,7 @@ void test('opening a chest is authoritative, happens once, and produces shared c
   applyCommand(r, a.id, { type: 'chest', index: 0 }, 6100);
   assert.equal(
     r.drops?.length,
-    floorAmmo().length,
+    floorAmmo().length + smokeLoot().length,
     'Distant players cannot open it',
   );
   Object.assign(a, { ...p, z: p.z + 2 });
@@ -72,10 +73,10 @@ void test('opening a chest is authoritative, happens once, and produces shared c
   a.y = 1.7;
   applyCommand(r, a.id, { type: 'chest', index: 0 }, 6300);
   applyCommand(r, b.id, { type: 'chest', index: 0 }, 6300);
-  assert.equal(r.drops!.length, floorAmmo().length + 3);
+  assert.equal(r.drops!.length, floorAmmo().length + smokeLoot().length + 3);
   assert.equal(snapshot(r, 6300).chests![0].openedAt, 6300);
-  const index = MAP.loot.length + floorAmmo().length;
-  const drop = r.drops![floorAmmo().length];
+  const index = MAP.loot.length + (floorAmmo().length + smokeLoot().length);
+  const drop = r.drops![floorAmmo().length + smokeLoot().length];
   Object.assign(a, { x: drop.x, z: drop.z });
   Object.assign(b, { x: drop.x, z: drop.z });
   applyCommand(r, a.id, { type: 'pickup', index }, 6400);
@@ -163,7 +164,7 @@ void test('ready up preserves the room and starts exactly one fresh round when e
     ),
   );
   assert.ok(r.chests!.every((c) => !c.openedAt));
-  assert.equal(r.drops!.length, floorAmmo().length);
+  assert.equal(r.drops!.length, floorAmmo().length + smokeLoot().length);
   applyCommand(r, 'b', { type: 'ready' }, 7400);
   assert.equal(r.round, 2);
 });

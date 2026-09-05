@@ -182,17 +182,27 @@ export function FriendsRoom({
         <div className="room-mode-controls">
           <span>Match mode {isHost ? '' : '· chosen by host'}</span>
           <div className="mode-options">
-            {(['solo', 'duos'] as const).map((mode) => (
+            {(['solo', 'duos', 'gun-game'] as const).map((mode) => (
               <button
                 key={mode}
                 disabled={!isHost || status !== 'connected'}
                 aria-pressed={(room.mode ?? 'solo') === mode}
                 onClick={() => command({ type: 'mode', mode })}
               >
-                {mode === 'solo' ? 'Free for all' : 'Duos'}
+                {mode === 'gun-game'
+                  ? 'Gun Game'
+                  : mode === 'solo'
+                    ? 'Free for all'
+                    : 'Duos'}
               </button>
             ))}
           </div>
+          {room.mode === 'gun-game' && (
+            <p>
+              8 weapons. Every elimination advances your gun. Respawn in 3
+              seconds with your progress saved. Finish the lineup to win.
+            </p>
+          )}
           <span>Bot opponents</span>
           <div className="mode-options">
             {[0, 4, 8].map((count) => (
@@ -206,7 +216,12 @@ export function FriendsRoom({
               </button>
             ))}
           </div>
-          <p>Bots loot and fight everyone. Friends keep all 8 human seats.</p>
+          <p>
+            {room.mode === 'gun-game'
+              ? 'Play with friends, or add bots to practice.'
+              : 'Bots loot and fight everyone.'}{' '}
+            Friends keep all 8 human seats.
+          </p>
           {room.mode === 'duos' && (
             <>
               <p>Choose the same team as your friend. Two players per team.</p>
@@ -294,7 +309,9 @@ export function FriendsRoom({
             !(room.botCount ?? 0)
               ? 'Share your invite link. Invite a friend or turn on bots to start.'
               : isHost
-                ? 'Everyone here joins the match. Ready to drop?'
+                ? room?.mode === 'gun-game'
+                  ? 'Everyone starts with a pistol. Ready to race?'
+                  : 'Everyone here joins the match. Ready to drop?'
                 : 'The host will start the match when everyone is here.'}
           </p>
         </>
@@ -327,8 +344,9 @@ export function FriendsRoom({
       )}
       {(room?.phase === 'playing' || room?.phase === 'countdown') && (
         <p className="touch-help">
-          The match is in progress. Close this panel to watch surviving players
-          from the results screen. Stay in the room for the next round.
+          {room.mode === 'gun-game'
+            ? 'Close this panel and enter the match. You can join Gun Game while a round is running.'
+            : 'The match is in progress. Close this panel to watch surviving players from the results screen. Stay in the room for the next round.'}
         </p>
       )}
       <button className="text-button" onClick={leave}>

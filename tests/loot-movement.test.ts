@@ -1,3 +1,4 @@
+import { smokeLoot } from '../lib/game/battlefield.ts';
 import { floorAmmo } from '../lib/game/chests.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -124,7 +125,7 @@ void test('eliminations drop equipment once and one player can claim each stack'
   room.phase = 'finished';
   applyCommand(room, a.id, { type: 'rematch' }, 1400);
   applyCommand(room, a.id, { type: 'start' }, 1500);
-  assert.equal(room.drops?.length, floorAmmo().length);
+  assert.equal(room.drops?.length, floorAmmo().length + smokeLoot().length);
   assert.ok(room.players.every((p) => p.tiers?.every((tier) => tier === 0)));
 });
 void test('mantling climbs reachable cover and supports movement on top while rejecting high or distant walls', () => {

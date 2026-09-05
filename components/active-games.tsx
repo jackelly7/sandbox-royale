@@ -94,14 +94,20 @@ export function ActiveGames({
         ) : rooms.length ? (
           rooms.map((room) => {
             const watching =
-              room.phase === 'playing' || room.phase === 'countdown';
+              room.mode !== 'gun-game' &&
+              (room.phase === 'playing' || room.phase === 'countdown');
             const own = room.code === currentCode;
             return (
               <div className="active-game-row" key={room.code}>
                 <div className="active-game-info">
                   <strong>{room.hostName}&apos;s room</strong>
                   <span>
-                    <Users size={13} /> {room.mode === 'duos' ? 'Duos' : 'Solo'}{' '}
+                    <Users size={13} />{' '}
+                    {room.mode === 'gun-game'
+                      ? 'Gun Game'
+                      : room.mode === 'duos'
+                        ? 'Duos'
+                        : 'Solo'}{' '}
                     · {room.players}/{room.capacity} online{' '}
                     <span aria-hidden="true">·</span> {room.code}
                   </span>
@@ -112,7 +118,9 @@ export function ActiveGames({
                         ? 'Between rounds'
                         : room.phase === 'countdown'
                           ? 'Starting now'
-                          : `${room.alive} remaining`}
+                          : room.mode === 'gun-game'
+                            ? 'Weapon race in progress'
+                            : `${room.alive} remaining`}
                   </small>
                 </div>
                 <button

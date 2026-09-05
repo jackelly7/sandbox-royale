@@ -3629,3 +3629,64 @@ kbd {
   pointer-events: auto;
   margin-top: 10px;
 }
+
+.smoke-overlay {
+  position: fixed;
+  inset: 0;
+  background: #b5c4c9;
+  opacity: 0.94;
+  z-index: 1;
+  pointer-events: none;
+}
+.gun-progress {
+  background: #15232ce8;
+  border: 1px solid #83dcc777;
+  padding: 10px 14px;
+  min-width: 260px;
+  color: #e6fff8;
+}
+.gun-progress strong {
+  display: block;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+}
+.gun-progress small {
+  font-size: 10px;
+  color: #adc5c2;
+}
+.gun-steps {
+  display: flex;
+  gap: 4px;
+  margin: 8px 0;
+}
+.gun-steps span {
+  flex: 1;
+  height: 5px;
+  background: #ffffff25;
+}
+.gun-steps .done {
+  background: #7ee6ad;
+}
+.gun-steps .current {
+  background: #ffd66c;
+}
+.gun-respawn {
+  position: fixed;
+  top: 24%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  background: #13222dee;
+  border: 1px solid #ffffff35;
+  padding: 14px 24px;
+  text-align: center;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.gun-respawn small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 7px;
+  color: #b8c9d1;
+}

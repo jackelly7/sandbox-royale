@@ -3,6 +3,11 @@ export const FEEL = [
   { kick: 0.075, view: 0.011, cycle: 0.2 },
   { kick: 0.14, view: 0.025, cycle: 0.8 },
   { kick: 0.11, view: 0.018, cycle: 1.2 },
+  { kick: 0.08, view: 0.014, cycle: 0.26 },
+  { kick: 0.035, view: 0.006, cycle: 0.09 },
+  { kick: 0.07, view: 0.012, cycle: 0.16 },
+  { kick: 0.1, view: 0.016, cycle: 0.48 },
+  { kick: 0.14, view: 0.023, cycle: 0.55 },
 ];
 export function reloadMotion(index: number, progress: number) {
   const p = Math.max(0, Math.min(1, progress));
@@ -28,12 +33,17 @@ export function animateWeapon(
     part.position.set(0, 0, 0);
     part.rotation.set(0, 0, 0);
     part.visible = true;
-    if (index === 0 && progress !== null) {
+    if ([0, 3, 4, 5, 6].includes(index) && progress !== null) {
       const out = Math.sin(
         Math.PI * Math.max(0, Math.min(1, (progress - 0.12) / 0.7)),
       );
       part.position.set(-out * 0.09, -out * 0.42, out * 0.05);
       part.rotation.z = out * 0.18;
+    }
+    if (index === 7 && progress !== null) {
+      const out = Math.sin(Math.PI * progress);
+      part.position.x = -0.18 * out;
+      part.rotation.z = out * 0.45;
     }
     if (index === 1 && progress === null && sinceShot < 0.72)
       part.position.z =

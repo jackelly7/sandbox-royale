@@ -1,3 +1,4 @@
+import { smokeBlocks } from '../lib/game/battlefield.ts';
 import { GLIDE_SPEED } from '../lib/game/traversal.ts';
 import { MAP } from '../lib/game/map-data.ts';
 import { ARENA_RADIUS } from '../lib/game/arena.ts';
@@ -95,11 +96,15 @@ function command(
   applyCommand(room, p.id, c, now, true);
 }
 export function updateRoomBots(room: Room, now: number, dt: number) {
-  const zone = zoneAt(
-    Math.max(0, (now - room.startAt) / 1000 - (room.busDuration ?? 0)),
-    `${room.code}:${room.round}`,
-  );
+  const zone =
+    room.mode === 'gun-game'
+      ? { x: 0, z: 0, radius: 65, next: { x: 0, z: 0, radius: 65 } }
+      : zoneAt(
+          Math.max(0, (now - room.startAt) / 1000 - (room.busDuration ?? 0)),
+          `${room.code}:${room.round}`,
+        );
   for (const p of room.players) {
+    if (room.phase !== 'playing') return;
     if (!p.bot || p.health <= 0 || p.onBus || p.downed) continue;
     const ai = (p.ai ??= { thinkAt: 0, jumpAt: 8 });
     if (now >= ai.thinkAt) {
@@ -108,8 +113,10 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
         (q) =>
           q.id !== p.id &&
           q.health > 0 &&
+          (q.protectedUntil ?? 0) <= now &&
           !q.spectator &&
           !q.onBus &&
+          !smokeBlocks(p, q, room.smokes ?? [], now - room.startAt) &&
           (room.mode !== 'duos' || q.team !== p.team),
       );
       const enemy = enemies.sort(
@@ -205,9 +212,9 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
         else if (p.shield < 40 && p.cells && !p.healing)
           command(room, p, { type: 'heal', item: 'shield' }, now);
         if (enemy && usable && !p.healing) {
-          const slots = [0, 1, 2].filter(
-            (i) => p.owned[i] && (p.ammo[i] > 0 || p.reserve[i] > 0),
-          );
+          const slots = p.owned
+            .map((_, i) => i)
+            .filter((i) => p.owned[i] && (p.ammo[i] > 0 || p.reserve[i] > 0));
           slots.sort(
             (a, b) =>
               (weaponDamage(b, distance) * WEAPONS[b].pellets) /
@@ -221,12 +228,14 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
             p.reloadUntil = 0;
           }
           if (!p.ammo[weapon]) command(room, p, { type: 'reload' }, now);
-          const visible = canReach(
-            { ...p, y: p.y - 0.35 },
-            { ...enemy, y: enemy.y - 0.4 },
-            MAP.colliders,
-            WEAPONS[weapon].range,
-          );
+          const visible =
+            !smokeBlocks(p, enemy, room.smokes ?? [], now - room.startAt) &&
+            canReach(
+              { ...p, y: p.y - 0.35 },
+              { ...enemy, y: enemy.y - 0.4 },
+              MAP.colliders,
+              WEAPONS[weapon].range,
+            );
           if (visible) {
             const error = Math.sin(now * 0.003 + p.id.length + p.team!) * 0.024;
             p.yaw = Math.atan2(-(enemy.x - p.x), -(enemy.z - p.z)) + error;
