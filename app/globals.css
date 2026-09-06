@@ -3690,3 +3690,181 @@ kbd {
   margin-top: 7px;
   color: #b8c9d1;
 }
+
+.leaderboard-toggle {
+  position: absolute;
+  top: 78px;
+  left: 28px;
+  z-index: 6;
+  padding: 7px 10px;
+  background: #19282ee8;
+  border: 1px solid #ffffff55;
+  border-radius: 4px;
+  color: white;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 700;
+}
+.live-scoreboard {
+  position: fixed;
+  inset: 12% auto auto 50%;
+  transform: translateX(-50%);
+  width: min(680px, 94vw);
+  max-height: 76vh;
+  overflow: auto;
+  z-index: 50;
+  padding: 20px;
+  border: 1px solid #ffffff40;
+  background: #102029f2;
+  color: #e9f4f1;
+  box-shadow: 0 14px 60px #0006;
+}
+.live-scoreboard header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.live-scoreboard h2 {
+  font-size: 22px;
+  margin: 5px 0 14px;
+}
+.live-scoreboard h3 {
+  margin: 18px 0 6px;
+  font-size: 14px;
+}
+.live-scoreboard header button {
+  color: white;
+  border: 1px solid #ffffff50;
+  background: none;
+  font-size: 24px;
+  padding: 0 10px;
+}
+.live-scoreboard table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.live-scoreboard th,
+.live-scoreboard td {
+  padding: 8px 7px;
+  border-bottom: 1px solid #ffffff16;
+  text-align: right;
+  white-space: nowrap;
+}
+.live-scoreboard th:first-child,
+.live-scoreboard td:first-child {
+  text-align: left;
+}
+.live-scoreboard td small {
+  display: block;
+  font-size: 10px;
+  color: #abc5c8;
+}
+.live-scoreboard .is-you {
+  background: #7ee2c41c;
+  color: #b2ffdf;
+}
+.live-scoreboard footer {
+  margin-top: 14px;
+  font-size: 11px;
+  color: #a9c3c7;
+}
+.score-scroll {
+  overflow: auto;
+}
+.final-weapon-banner {
+  position: absolute;
+  top: 16%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  padding: 12px 22px;
+  border: 1px solid #ffd77a;
+  background: #382b16ee;
+  color: #ffe3a5;
+  text-align: center;
+  font-weight: 800;
+  pointer-events: none;
+}
+.final-weapon-banner small {
+  display: block;
+  font-size: 12px;
+  font-weight: 400;
+  margin-top: 4px;
+}
+.regen-status {
+  position: absolute;
+  left: 30px;
+  bottom: 152px;
+  z-index: 4;
+  padding: 6px 10px;
+  background: #183a2de6;
+  color: #b1ffd6;
+  font-size: 11px;
+  pointer-events: none;
+}
+.comeback-status {
+  position: absolute;
+  top: 220px;
+  left: 28px;
+  max-width: 270px;
+  z-index: 4;
+  padding: 8px 12px;
+  border-left: 3px solid #7fffd2;
+  background: #15322be8;
+  color: #bdffe1;
+  font-size: 11px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.session-podium {
+  margin: 12px 0;
+  padding: 12px;
+  background: #ffffff08;
+  text-align: left;
+  max-height: 170px;
+  overflow: auto;
+}
+.session-podium h3 {
+  font-size: 13px;
+  margin: 0 0 8px;
+  color: #b8d8cf;
+}
+.session-podium > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 4px;
+  font-size: 13px;
+}
+@media (max-width: 600px) {
+  .live-scoreboard {
+    top: 8%;
+    padding: 12px;
+    max-height: 82vh;
+  }
+  .live-scoreboard table {
+    font-size: 11px;
+  }
+  .leaderboard-toggle {
+    top: 70px;
+    left: 12px;
+  }
+  .comeback-status {
+    top: 210px;
+    left: 12px;
+    max-width: 180px;
+    font-size: 10px;
+  }
+  .final-weapon-banner {
+    width: 75%;
+    font-size: 12px;
+    top: 23%;
+  }
+  .regen-status {
+    left: 12px;
+    bottom: 135px;
+    font-size: 9px;
+  }
+}

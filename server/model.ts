@@ -1,4 +1,17 @@
 import {
+  GUN_COLLIDERS,
+  arenaStep,
+  arenaGround,
+} from '../lib/game/gun-arena.ts';
+import {
+  REBOOT_STATIONS,
+  REBOOT_SECONDS,
+  comebacksOpen,
+  type ComebackToken,
+} from '../lib/game/comeback.ts';
+import {
+  REGEN_DELAY,
+  REGEN_PER_SECOND,
   GUN_LADDER,
   GUN_RESPAWN_MS,
   GUN_RADIUS,
@@ -71,6 +84,7 @@ import type {
   Player,
   PlayerPose,
   RoomSnapshot,
+  SessionScore,
 } from '../lib/game/multiplayer.ts';
 export const CAPACITY = 8;
 export type Member = Player & {
@@ -110,6 +124,9 @@ export type Room = {
   smokes?: Smoke[];
   events: GameEvent[];
   marks?: GameEvent[];
+  tokens?: ComebackToken[];
+  scores?: SessionScore[];
+  scoredRound?: number;
 };
 export class GameError extends Error {
   status: number;
@@ -127,6 +144,8 @@ export function cleanName(value: unknown) {
   if (!name) throw new GameError('Enter a player name.');
   return name;
 }
+export const roomBounds = (room: Pick<Room, 'mode'>) =>
+  room.mode === 'gun-game' ? GUN_COLLIDERS : MAP.colliders;
 export function blocked(x: number, z: number) {
   return MAP.colliders.some(
     (b) =>
@@ -172,6 +191,13 @@ export function createMember(
     cells: 0,
     healing: null,
     healUntil: 0,
+    deaths: 0,
+    lastDamageAt: now,
+    regenerating: false,
+    comebackUsed: false,
+    rebooting: null,
+    rebootUntil: 0,
+    rebootStation: -1,
     kills: 0,
     rank: 0,
     connected: true,
@@ -276,6 +302,9 @@ export function damageMember(
     (target.protectedUntil ?? 0) > now
   )
     return;
+  target.lastDamageAt = now;
+  target.regenerating = false;
+  stopReboot(target);
   stopRevive(target);
   for (const q of room.players) if (q.reviving === target.id) stopRevive(q);
   Object.assign(target, takeDamage(target.health, target.shield, amount));
@@ -308,6 +337,177 @@ function event(room: Room, data: Omit<GameEvent, 'id'>) {
   room.events.push({ ...data, id: randomUUID() });
   room.events = room.events.slice(-40);
 }
+function recordRound(room: Room) {
+  if (
+    room.phase !== 'finished' ||
+    room.round < 1 ||
+    room.scoredRound === room.round
+  )
+    return;
+  room.scoredRound = room.round;
+  room.scores ??= [];
+  for (const p of room.players) {
+    if (p.spectator) continue;
+    let score = room.scores.find((s) => s.id === p.id);
+    if (!score) {
+      score = {
+        id: p.id,
+        name: p.name,
+        bot: !!p.bot,
+        wins: 0,
+        kills: 0,
+        deaths: 0,
+        rounds: 0,
+      };
+      room.scores.push(score);
+    }
+    score.name = p.name;
+    score.rounds++;
+    score.kills += p.kills;
+    score.deaths += p.deaths ?? 0;
+    if (
+      room.winner === p.id ||
+      (room.mode === 'duos' &&
+        room.winningTeam != null &&
+        p.team === room.winningTeam)
+    )
+      score.wins++;
+  }
+  room.scores = room.scores.slice(-64);
+}
+function currentZone(room: Room, now: number) {
+  return zoneAt(
+    Math.max(0, (now - room.startAt) / 1000 - (room.busDuration ?? 0)),
+    `${room.code}:${room.round}`,
+    room.zonePlayers ?? 16,
+  );
+}
+function stopReboot(p: Member) {
+  p.rebooting = null;
+  p.rebootUntil = 0;
+  p.rebootStation = -1;
+}
+function dropToken(room: Room, p: Member, now: number) {
+  if (!comebacksOpen(room.mode, currentZone(room, now))) return;
+  const landing = safeLanding(p.x, p.z);
+  room.tokens ??= [];
+  for (const token of room.tokens)
+    if (token.carriedBy === p.id)
+      Object.assign(token, { ...landing, carriedBy: null });
+  if (!p.comebackUsed && !room.tokens.some((t) => t.player === p.id))
+    room.tokens.push({
+      player: p.id,
+      team: p.team ?? 0,
+      ...landing,
+      carriedBy: null,
+    });
+}
+function canReboot(
+  room: Room,
+  p: Member,
+  target: Member,
+  station: number,
+  now: number,
+) {
+  const spot = REBOOT_STATIONS[station],
+    zone = currentZone(room, now);
+  return (
+    !!spot &&
+    comebacksOpen(room.mode, zone) &&
+    room.phase === 'playing' &&
+    teammates(room, p, target) &&
+    p.health > 0 &&
+    !p.downed &&
+    !p.dropping &&
+    !p.mantleUntil &&
+    p.connected &&
+    target.connected &&
+    target.health <= 0 &&
+    !target.spectator &&
+    !target.comebackUsed &&
+    !outsideZone(spot.x, spot.z, zone) &&
+    canReach(p, { ...spot, y: 1 }, MAP.colliders, 3.6) &&
+    room.tokens?.some((t) => t.player === target.id && t.carriedBy === p.id)
+  );
+}
+function updateComebacks(room: Room, now: number) {
+  if (!comebacksOpen(room.mode, currentZone(room, now))) {
+    room.tokens = [];
+    for (const p of room.players) stopReboot(p);
+    return;
+  }
+  for (const token of room.tokens ?? []) {
+    if (token.carriedBy) continue;
+    const carrier = room.players.find(
+      (p) =>
+        p.id !== token.player &&
+        p.team === token.team &&
+        p.health > 0 &&
+        !p.downed &&
+        !p.dropping &&
+        !p.spectator &&
+        p.connected &&
+        canReach(p, { x: token.x, y: 0.8, z: token.z }, MAP.colliders, 2.5),
+    );
+    if (carrier) {
+      token.carriedBy = carrier.id;
+      event(room, {
+        type: 'token',
+        player: carrier.id,
+        target: token.player,
+        at: now,
+      });
+    }
+  }
+  for (const p of room.players) {
+    if (!p.rebooting) continue;
+    const target = room.players.find((q) => q.id === p.rebooting),
+      station = p.rebootStation ?? -1;
+    if (!target || !canReboot(room, p, target, station, now)) {
+      stopReboot(p);
+      continue;
+    }
+    if (now < (p.rebootUntil ?? Infinity)) continue;
+    const spot = REBOOT_STATIONS[station],
+      landing = safeLanding(spot.x, spot.z + 2);
+    Object.assign(target, {
+      ...landing,
+      y: 1.7,
+      health: 100,
+      shield: 0,
+      comebackUsed: true,
+      spawnedAt: now,
+      protectedUntil: now + 1800,
+      rank: 0,
+      respawnAt: 0,
+      downed: false,
+      bleedOutAt: 0,
+      diedAt: 0,
+      killedBy: null,
+      dropping: false,
+      onBus: false,
+      weapon: -1,
+      owned: [false, false, false],
+      tiers: [0, 0, 0],
+      ammo: [0, 0, 0],
+      reserve: [0, 0, 0],
+      medkits: 0,
+      cells: 0,
+      smokes: 0,
+      healing: null,
+      healUntil: 0,
+      reloadUntil: 0,
+      moveAt: now,
+      credit: 0,
+      mantleUntil: 0,
+      launchAt: -10000,
+    });
+    if (target.bot) target.ai = { thinkAt: 0, jumpAt: 0 };
+    room.tokens = (room.tokens ?? []).filter((t) => t.player !== target.id);
+    stopReboot(p);
+    event(room, { type: 'reboot', player: p.id, target: target.id, at: now });
+  }
+}
 function finishGun(room: Room, winner: Member | undefined) {
   room.phase = 'finished';
   room.winner = winner?.id ?? null;
@@ -322,6 +522,7 @@ function finishGun(room: Room, winner: Member | undefined) {
     );
   ordered.forEach((p, i) => (p.rank = i + 1));
   if (winner) winner.rank = 1;
+  recordRound(room);
 }
 function respawnGun(room: Room, p: Member, now: number) {
   const spot = gunSpawn(
@@ -340,6 +541,8 @@ function respawnGun(room: Room, p: Member, now: number) {
     rank: 0,
     respawnAt: 0,
     spawnedAt: now,
+    lastDamageAt: now,
+    regenerating: false,
     protectedUntil: now + 1800,
     killedBy: null,
     healing: null,
@@ -355,7 +558,10 @@ function respawnGun(room: Room, p: Member, now: number) {
   if (p.bot) p.ai = { thinkAt: 0, jumpAt: 0 };
 }
 function eliminate(room: Room, player: Member, now: number, killer?: Member) {
-  if (player.rank || player.spectator) return;
+  if (player.rank || player.spectator || player.respawnAt) return;
+  player.deaths = (player.deaths ?? 0) + 1;
+  stopReboot(player);
+  if (room.mode === 'duos') dropToken(room, player, now);
   if (room.mode === 'gun-game') {
     if (player.respawnAt) return;
     player.health = 0;
@@ -371,6 +577,8 @@ function eliminate(room: Room, player: Member, now: number, killer?: Member) {
     if (killer && killer.id !== player.id) {
       killer.kills++;
       killer.gunStage = (killer.gunStage ?? 0) + 1;
+      if (killer.gunStage === GUN_LADDER.length - 1)
+        event(room, { type: 'finalWeapon', player: killer.id, at: now });
       if (killer.gunStage >= GUN_LADDER.length) finishGun(room, killer);
       else
         Object.assign(killer, gunLoadout(killer.gunStage), { pickedUpAt: now });
@@ -434,6 +642,7 @@ export function advance(room: Room, now: number) {
       p.reloadUntil = 0;
     }
   }
+  if (room.phase === 'finished') recordRound(room);
   if (room.phase === 'waiting' || room.phase === 'finished') {
     room.players = room.players.filter(
       (p) => p.bot || now - p.lastSeen < 60000,
@@ -526,6 +735,7 @@ export function advance(room: Room, now: number) {
       }
     }
     if (
+      room.mode !== 'gun-game' &&
       !p.dropping &&
       !p.downed &&
       !p.mantleUntil &&
@@ -551,11 +761,33 @@ export function advance(room: Room, now: number) {
       )
     ) {
       stopRevive(p);
+      stopReboot(p);
+      p.lastDamageAt = now;
+      p.regenerating = false;
       p.health = Math.max(0, p.health - dt * (elapsed > 300 ? 11 : 5));
       if (!p.health) eliminate(room, p, now);
     }
   }
+  updateComebacks(room, now);
   if (dt > 0) updateRoomBots(room, now, Math.min(dt, 0.25));
+  if (room.mode === 'gun-game' && room.phase === 'playing')
+    for (const p of room.players) {
+      p.regenerating = false;
+      if (
+        p.health <= 0 ||
+        p.health >= 100 ||
+        now < (p.lastDamageAt ?? now) + REGEN_DELAY
+      )
+        continue;
+      const healingSeconds = Math.max(
+        0,
+        (now -
+          Math.max(now - dt * 1000, (p.lastDamageAt ?? now) + REGEN_DELAY)) /
+          1000,
+      );
+      p.health = Math.min(100, p.health + healingSeconds * REGEN_PER_SECOND);
+      p.regenerating = p.health < 100;
+    }
   for (const p of room.players) autoAmmo(room, p, now);
   for (const p of room.players) {
     const item = p.healing;
@@ -611,6 +843,7 @@ export function advance(room: Room, now: number) {
         (room.mode === 'duos' && !p.spectator && p.team === room.winningTeam)
       )
         p.rank = 1;
+    recordRound(room);
   }
 }
 export function autoAmmo(room: Room, p: Member, now: number) {
@@ -665,7 +898,7 @@ function validPose(p: unknown): p is PlayerPose {
     v.weapon < WEAPONS.length
   );
 }
-function move(p: Member, pose: PlayerPose, now: number) {
+function move(room: Room, p: Member, pose: PlayerPose, now: number) {
   if (!validPose(pose)) throw new GameError('Invalid movement.');
   if (p.onBus) {
     p.yaw = pose.yaw;
@@ -700,30 +933,41 @@ function move(p: Member, pose: PlayerPose, now: number) {
     distance = Math.hypot(dx, dz);
   if (
     distance <= p.credit &&
-    Math.hypot(pose.x, pose.z) <= ARENA_RADIUS + 0.1
+    Math.hypot(pose.x, pose.z) <=
+      (room.mode === 'gun-game' ? GUN_RADIUS : ARENA_RADIUS) + 0.1
   ) {
-    let clear = true;
+    let clear = true,
+      feet = p.y - 1.7;
     const steps = Math.max(1, Math.ceil(distance / 0.25));
-    for (let i = 1; i <= steps && !p.dropping; i++)
-      if (
-        blocksBody(
-          p.x + (dx * i) / steps,
-          p.z + (dz * i) / steps,
-          Math.min(p.y, pose.y) - 1.7,
-          MAP.colliders,
-        )
+    for (let i = 1; i <= steps && !p.dropping; i++) {
+      const x = p.x + (dx * i) / steps,
+        z = p.z + (dz * i) / steps;
+      if (room.mode === 'gun-game') {
+        const next = arenaStep(x, z, feet);
+        if (next === null) {
+          clear = false;
+          break;
+        }
+        feet = next;
+      } else if (
+        blocksBody(x, z, Math.min(p.y, pose.y) - 1.7, roomBounds(room))
       ) {
         clear = false;
         break;
       }
+    }
     if (clear) {
       p.x = pose.x;
       p.z = pose.z;
       p.credit -= distance;
+      if (room.mode === 'gun-game') p.y = Math.max(p.y, feet + 1.7);
     }
   }
   if (!p.dropping) {
-    const floor = groundAt(p.x, p.z, p.y - 1.7, MAP.colliders) + 1.7;
+    const floor =
+      (room.mode === 'gun-game'
+        ? arenaGround(p.x, p.z, p.y - 1.7)
+        : groundAt(p.x, p.z, p.y - 1.7, roomBounds(room))) + 1.7;
     p.y = p.downed
       ? floor
       : Math.max(
@@ -739,7 +983,12 @@ function move(p: Member, pose: PlayerPose, now: number) {
     p.reloadUntil = 0;
   }
 }
-function rayBox(origin: number[], dir: number[], min: number[], max: number[]) {
+function rayBox(
+  origin: number[],
+  dir: number[],
+  min: readonly number[],
+  max: readonly number[],
+) {
   let near = 0,
     far = 160;
   for (let i = 0; i < 3; i++) {
@@ -788,7 +1037,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
     const dir = shotDirection(p.yaw, p.pitch, shotWeapon, aiming, n);
     let nearest = w.range,
       target: Member | undefined;
-    for (const box of MAP.colliders) {
+    for (const box of roomBounds(room)) {
       const t = rayBox(origin, dir, box.min, box.max);
       if (t !== null && t < nearest) nearest = t;
     }
@@ -880,7 +1129,7 @@ function melee(room: Room, p: Member, now: number) {
           !teammates(room, p, q),
       )
       .map((q) => meleeBody(q.id, q.x, q.y, q.z, q.crouching, q.downed)),
-    MAP.colliders,
+    roomBounds(room),
   );
   event(room, { type: 'melee', player: p.id, end: contact?.point, at: now });
   if (!contact) return;
@@ -1005,6 +1254,7 @@ export function applyCommand(
     room.winningTeam = null;
     room.loot = MAP.loot.map((_, i) => !floorAvailable(i));
     room.smokes = [];
+    room.tokens = [];
     room.supply = supplyPlan(`${room.code}:${room.round}`);
     room.drops = [...floorAmmo(), ...smokeLoot()].map((d) => ({
       ...d,
@@ -1073,6 +1323,10 @@ export function applyCommand(
     room.winner = null;
     return;
   }
+  if (command.type === 'cancelReboot') {
+    stopReboot(p);
+    return;
+  }
   if (command.type === 'ping') return;
   if (room.phase !== 'playing' || p.health <= 0) return;
   if (command.type === 'jumpBus' && p.onBus) {
@@ -1085,11 +1339,17 @@ export function applyCommand(
   if (p.onBus && command.type !== 'pose' && command.type !== 'mark') return;
   if (
     room.mode === 'gun-game' &&
-    ['heal', 'smoke', 'pickup', 'chest', 'supply', 'revive'].includes(
+    ['heal', 'smoke', 'pickup', 'chest', 'supply', 'revive', 'reboot'].includes(
       command.type,
     )
   )
     return;
+  if (
+    command.type !== 'pose' &&
+    command.type !== 'reboot' &&
+    command.type !== 'mark'
+  )
+    stopReboot(p);
   if (command.type === 'mark') {
     if (now - (p.lastMark ?? 0) < 1000) return;
     if (
@@ -1116,7 +1376,7 @@ export function applyCommand(
     return;
   }
   if (p.downed) {
-    if (command.type === 'pose') move(p, command.pose, now);
+    if (command.type === 'pose') move(room, p, command.pose, now);
     return;
   }
   if (
@@ -1128,10 +1388,24 @@ export function applyCommand(
     )
   )
     return;
+  if (command.type === 'reboot') {
+    const token = room.tokens?.find((t) => t.carriedBy === p.id);
+    const target = room.players.find((q) => q.id === token?.player);
+    if (!target || !canReboot(room, p, target, command.station, now)) return;
+    if (p.rebooting === target.id && p.rebootStation === command.station)
+      return;
+    stopRevive(p);
+    cancelRecovery(p);
+    p.reloadUntil = 0;
+    p.rebooting = target.id;
+    p.rebootStation = command.station;
+    p.rebootUntil = now + REBOOT_SECONDS * 1000;
+    return;
+  }
   if (command.type === 'smoke') {
     if ((p.smokes ?? 0) < 1 || (room.smokes?.length ?? 0) >= SMOKE_LIMIT)
       return;
-    move(p, command.pose, now);
+    move(room, p, command.pose, now);
     room.smokes ??= [];
     room.smokes.push(
       throwSmoke(
@@ -1169,11 +1443,14 @@ export function applyCommand(
   }
   if (command.type === 'mantle') {
     if (p.mantleUntil && now < p.mantleUntil) return;
-    move(p, command.pose, now);
-    const floor = groundAt(p.x, p.z, p.y - 1.7, MAP.colliders) + 1.7;
+    move(room, p, command.pose, now);
+    const floor =
+      (room.mode === 'gun-game'
+        ? arenaGround(p.x, p.z, p.y - 1.7)
+        : groundAt(p.x, p.z, p.y - 1.7, roomBounds(room))) + 1.7;
     const to =
       Math.abs(p.y - floor) < 0.2
-        ? mantleTarget(p, p.yaw, MAP.colliders)
+        ? mantleTarget(p, p.yaw, roomBounds(room))
         : null;
     if (to) {
       p.crouching = false;
@@ -1206,7 +1483,7 @@ export function applyCommand(
     command.type === 'shoot' ||
     command.type === 'melee'
   )
-    move(p, command.pose, now);
+    move(room, p, command.pose, now);
   if (command.type === 'shoot') shoot(room, p, command.aiming, now);
   if (command.type === 'melee') melee(room, p, now);
   if (
@@ -1319,6 +1596,9 @@ export function snapshot(room: Room, now: number): RoomSnapshot {
     host: room.host,
     botCount: room.botCount ?? 0,
     busDuration: room.busDuration ?? 0,
+    tokens: room.tokens ?? [],
+    scores: room.scores ?? [],
+    comebacksOpen: room.phase === 'playing' && comebacksOpen(room.mode, zone),
     smokes: room.smokes ?? [],
     supply: room.supply,
     mode: room.mode ?? 'solo',
@@ -1377,11 +1657,19 @@ export function parseCommand(value: unknown): Command {
       'ready',
       'jumpBus',
       'supply',
+      'cancelReboot',
       'cancelHeal',
       'cancelRevive',
     ].includes(c.type)
   )
     return { type: c.type } as Command;
+  if (
+    c.type === 'reboot' &&
+    Number.isInteger(c.station) &&
+    c.station >= 0 &&
+    c.station < REBOOT_STATIONS.length
+  )
+    return { type: 'reboot', station: c.station };
   if (c.type === 'bots' && [0, 4, 8].includes(c.count))
     return { type: 'bots', count: c.count };
   if (
@@ -1443,6 +1731,7 @@ export function forViewer(room: RoomSnapshot, playerId: string): RoomSnapshot {
   const me = room.players.find((p) => p.id === playerId);
   return {
     ...room,
+    tokens: room.tokens?.filter((t) => t.team === me?.team),
     events: room.events.filter(
       (e) =>
         e.type !== 'mark' ||

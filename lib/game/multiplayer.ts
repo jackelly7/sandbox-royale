@@ -1,3 +1,4 @@
+import type { ComebackToken } from './comeback.ts';
 import type { Smoke, SupplyDrop } from './battlefield.ts';
 import type { ChestState } from './chests.ts';
 import type { WorldDrop } from './loot.ts';
@@ -21,6 +22,13 @@ export type Player = PlayerPose &
     health: number;
     shield: number;
     kills: number;
+    deaths?: number;
+    lastDamageAt?: number;
+    regenerating?: boolean;
+    comebackUsed?: boolean;
+    rebooting?: string | null;
+    rebootStation?: number;
+    rebootUntil?: number;
     rank: number;
     connected: boolean;
     ready?: boolean;
@@ -55,6 +63,15 @@ export type Player = PlayerPose &
     shotAt: number;
     meleeAt?: number;
   };
+export type SessionScore = {
+  id: string;
+  name: string;
+  bot: boolean;
+  wins: number;
+  kills: number;
+  deaths: number;
+  rounds: number;
+};
 export type RoomSnapshot = {
   code: string;
   host: string;
@@ -76,10 +93,16 @@ export type RoomSnapshot = {
   busDuration?: number;
   smokes?: Smoke[];
   supply?: SupplyDrop;
+  tokens?: ComebackToken[];
+  scores?: SessionScore[];
+  comebacksOpen?: boolean;
 };
 export type GameEvent = {
   id: string;
   type:
+    | 'reboot'
+    | 'token'
+    | 'finalWeapon'
     | 'smoke'
     | 'supply'
     | 'chest'
@@ -112,6 +135,8 @@ export type Command =
   | { type: 'melee'; pose: PlayerPose }
   | { type: 'smoke'; pose: PlayerPose }
   | { type: 'supply' }
+  | { type: 'reboot'; station: number }
+  | { type: 'cancelReboot' }
   | { type: 'reload' }
   | { type: 'heal'; item: SupplyKind }
   | { type: 'cancelHeal' }

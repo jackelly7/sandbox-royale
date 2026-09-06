@@ -55,6 +55,9 @@ import type {
   RoomSession,
   ConnectionStatus,
 } from '@/lib/game/multiplayer';
+import { MatchScoreboard } from '@/components/match-scoreboard';
+import { GunArenaMap } from '@/components/gun-arena-map';
+import { REBOOT_STATIONS } from '@/lib/game/comeback';
 import { GUN_LADDER } from '@/lib/game/gun-game';
 import { WEAPONS, SUPPLIES, RARITIES } from '@/lib/game/rules';
 import { zoneAt } from '@/lib/game/zones';
@@ -113,13 +116,14 @@ const controls = [
   ['C / CTRL', 'Toggle crouch / hold crouch'],
   ['SPACE', 'Jump from bus / jump / mantle'],
   ['M', 'Open / close tactical map'],
+  ['TAB', 'Hold for live leaderboard and session scores'],
   ['R', 'Reload'],
   ['V', 'Switch first / third person'],
   ['E', 'Collect / revive teammate'],
   ['G / Middle click', 'Ping enemy, loot, or location'],
   ['Q / F', 'Use medkit / shield cell'],
   ['H', 'Throw smoke grenade'],
-  ['X', 'Cancel healing / revive'],
+  ['X', 'Cancel healing / revive / comeback'],
   ['[ / ]', 'Switch player while spectating'],
   ['1  2  3 / WHEEL', 'Switch collected weapons'],
   ['ESC', 'Pause'],
@@ -128,10 +132,16 @@ const controls = [
 function IslandMap({
   state: worldState,
   large = false,
+  room,
+  playerId,
 }: {
   state: GameState;
   large?: boolean;
+  room?: RoomSnapshot | null;
+  playerId?: string;
 }) {
+  if (worldState.mode === 'gun-game')
+    return <GunArenaMap state={worldState} large={large} />;
   const circle = (c: { x: number; z: number; radius: number }) => ({
     ...c,
     x: c.x / ARENA_SCALE,
@@ -339,6 +349,54 @@ function IslandMap({
               aria-label="Next safe circle"
             />
           )}
+          {room?.comebacksOpen &&
+            REBOOT_STATIONS.map((s, i) => (
+              <g
+                key={`station-${i}`}
+                transform={`translate(${s.x / ARENA_SCALE} ${s.z / ARENA_SCALE})`}
+                aria-label={`Comeback station ${s.name}`}
+              >
+                <rect
+                  x="-2.5"
+                  y="-2.5"
+                  width="5"
+                  height="5"
+                  fill="#7fffd2"
+                  stroke="#18342b"
+                  strokeWidth=".7"
+                />
+                {large && (
+                  <text y="-5" textAnchor="middle" fontSize="3.3" fill="#fff">
+                    COMEBACK
+                  </text>
+                )}
+              </g>
+            ))}
+          {room?.tokens
+            ?.filter(
+              (t) =>
+                !t.carriedBy &&
+                t.team === room.players.find((p) => p.id === playerId)?.team,
+            )
+            .map((t) => (
+              <g
+                key={t.player}
+                transform={`translate(${t.x / ARENA_SCALE} ${t.z / ARENA_SCALE})`}
+                aria-label="Teammate comeback token"
+              >
+                <circle
+                  r="3"
+                  fill="#7fffd2"
+                  stroke="#142b25"
+                  strokeWidth=".8"
+                />
+                {large && (
+                  <text y="-5" textAnchor="middle" fontSize="3.3" fill="#fff">
+                    TEAMMATE TOKEN
+                  </text>
+                )}
+              </g>
+            ))}
           {worldState.supply && (
             <g
               transform={`translate(${worldState.supply.x / ARENA_SCALE} ${worldState.supply.z / ARENA_SCALE})`}
@@ -551,6 +609,17 @@ export default function Home() {
     Math.hypot(teammate.x - state.x, teammate.z - state.z) <= 3
       ? teammate
       : null;
+  const token = room?.tokens?.find((t) => t.player === teammate?.id);
+  const ownToken = room?.tokens?.find((t) => t.player === ownPlayer?.id);
+  const finalWeapon = gunGame
+    ? room?.events.findLast(
+        (e) => e.type === 'finalWeapon' && room.now - e.at < 4500,
+      )
+    : undefined;
+  const rebootRemaining = Math.max(
+    0,
+    ((ownPlayer?.rebootUntil ?? 0) - (room?.now ?? 0)) / 1000,
+  );
   const zone = state.zone ?? zoneAt(state.elapsed);
   const time = Math.ceil(zone.remaining);
   const clock = `${Math.floor(time / 60)
@@ -787,6 +856,30 @@ export default function Home() {
               <Pause size={20} />
             </button>
           </div>
+          {session && (
+            <button
+              className="leaderboard-toggle"
+              onClick={() =>
+                game.current?.showScoreboard(!state.scoreboardOpen)
+              }
+              aria-expanded={!!state.scoreboardOpen}
+            >
+              TAB · SCORES
+            </button>
+          )}
+          {state.scoreboardOpen && room && (
+            <MatchScoreboard
+              room={room}
+              playerId={session?.playerId}
+              close={() => game.current?.showScoreboard(false)}
+            />
+          )}
+          {finalWeapon && (
+            <output className="final-weapon-banner">
+              {room?.players.find((p) => p.id === finalWeapon.player)?.name} HAS
+              THE FINAL WEAPON<small>One more elimination wins the round</small>
+            </output>
+          )}
           <div className="match-status">
             <span>
               <Users size={17} />
@@ -806,12 +899,12 @@ export default function Home() {
             M · MAP
           </button>
           <div className="minimap">
-            <IslandMap state={state} />
+            <IslandMap state={state} room={room} playerId={session?.playerId} />
             <div className={`storm-timer ${state.outside ? 'danger' : ''}`}>
               <span className="storm-symbol">◉</span>
               <span>
                 {gunGame
-                  ? 'GUN GAME ARENA'
+                  ? 'SANDCASTLE COURTYARD'
                   : zone.stage === 'final'
                     ? 'FINAL CIRCLE'
                     : `ZONE ${zone.phase} · ${zone.stage === 'waiting' ? 'CLOSES IN' : 'CLOSING'}`}
@@ -1055,7 +1148,12 @@ export default function Home() {
                     Close · M / Esc
                   </button>
                 </div>
-                <IslandMap state={state} large />
+                <IslandMap
+                  state={state}
+                  large
+                  room={room}
+                  playerId={session?.playerId}
+                />
                 <p>
                   Mint circles: launch pads · Yellow: drop bus · White dashed
                   ring: next circle
@@ -1152,6 +1250,61 @@ export default function Home() {
               {state.medkits > 0 ? 'Q TO HEAL' : 'FIND A MEDKIT'}
             </div>
           )}
+          {playing && gunGame && state.health < 100 && state.health > 0 && (
+            <div className="regen-status">
+              {ownPlayer?.regenerating
+                ? 'HEALTH RECOVERING'
+                : `RECOVERY IN ${Math.max(0, Math.ceil(((ownPlayer?.lastDamageAt ?? 0) + 5000 - (room?.now ?? 0)) / 1000))}s WITHOUT DAMAGE`}
+            </div>
+          )}
+          {room?.mode === 'duos' && room.phase === 'playing' && (
+            <div className="comeback-status">
+              {!room.comebacksOpen
+                ? 'COMEBACK STATIONS CLOSED · CIRCLE 4'
+                : ownPlayer?.health === 0
+                  ? ownPlayer.comebackUsed
+                    ? 'YOUR COMEBACK WAS USED'
+                    : ownToken?.carriedBy
+                      ? 'YOUR TEAMMATE HAS YOUR TOKEN'
+                      : ownToken
+                        ? 'YOUR TOKEN IS MARKED FOR YOUR TEAMMATE'
+                        : 'ONE COMEBACK PER PLAYER'
+                  : token
+                    ? token.carriedBy === ownPlayer?.id
+                      ? 'TOKEN COLLECTED · REACH A MARKED STATION'
+                      : `RECOVER ${teammate?.name.toUpperCase()}'S TOKEN · CHECK M MAP`
+                    : ownPlayer?.comebackUsed
+                      ? 'COMEBACK USED · STAY IN THE SANDBOX'
+                      : 'ONE COMEBACK EACH · STATIONS CLOSE AT CIRCLE 4'}
+            </div>
+          )}
+          {playing && ownPlayer?.rebooting && (
+            <section
+              className="healing-progress"
+              aria-label="Teammate comeback progress"
+            >
+              <RotateCcw size={22} />
+              <div>
+                <strong>BRINGING {teammate?.name.toUpperCase()} BACK</strong>
+                <div className="healing-track">
+                  <span
+                    style={{
+                      width: `${Math.max(0, 100 - (rebootRemaining / 5) * 100)}%`,
+                    }}
+                  />
+                </div>
+                <small>
+                  {rebootRemaining.toFixed(1)}s · Stay at the station · Damage
+                  interrupts
+                </small>
+              </div>
+              <button
+                onClick={() => client.current?.send({ type: 'cancelReboot' })}
+              >
+                <kbd>X</kbd> Cancel
+              </button>
+            </section>
+          )}
           {playing && state.healing && (
             <section className="healing-progress" aria-label="Healing progress">
               {state.healing === 'medkit' ? (
@@ -1225,13 +1378,18 @@ export default function Home() {
             playing &&
             !ownPlayer?.downed &&
             !reviveTarget &&
-            !ownPlayer?.reviving && (
+            !ownPlayer?.reviving &&
+            !ownPlayer?.rebooting && (
               <button
                 className="pickup-prompt"
                 onClick={() => game.current?.interact()}
               >
                 <kbd>E</kbd>{' '}
-                {state.pickup === 'Open treasure chest' ? 'OPEN' : 'COLLECT'}{' '}
+                {state.pickup === 'Bring teammate back'
+                  ? 'START'
+                  : state.pickup.startsWith('Open ')
+                    ? 'OPEN'
+                    : 'COLLECT'}{' '}
                 <b>
                   {state.pickup === 'Open treasure chest'
                     ? 'Treasure chest'
@@ -1606,7 +1764,9 @@ export default function Home() {
               {session
                 ? room?.phase === 'finished'
                   ? `Round ${room.round} complete · Your room stays together`
-                  : 'Your friends are still in the sandbox'
+                  : ownToken && room?.comebacksOpen
+                    ? 'Your teammate can retrieve your token and bring you back'
+                    : 'Your friends are still in the sandbox'
                 : 'A fresh sandbox is one drop away'}
             </p>
             <div className="result-stats">
@@ -1667,6 +1827,26 @@ export default function Home() {
                   ))}
               </div>
             )}
+            {session &&
+              room?.phase === 'finished' &&
+              (room.scores?.length ?? 0) > 0 && (
+                <div className="session-podium">
+                  <h3>Session wins</h3>
+                  {[...(room.scores ?? [])]
+                    .sort((a, b) => b.wins - a.wins || b.kills - a.kills)
+                    .map((s) => (
+                      <div key={s.id}>
+                        <span>
+                          {s.name}
+                          {s.id === session.playerId ? ' · YOU' : ''}
+                        </span>
+                        <b>
+                          {s.wins} {s.wins === 1 ? 'win' : 'wins'}
+                        </b>
+                      </div>
+                    ))}
+                </div>
+              )}
             {session && room?.phase === 'finished' && (
               <div className="rematch-ready">
                 <div
@@ -1688,7 +1868,9 @@ export default function Home() {
                 >
                   {ownPlayer?.ready
                     ? 'READY · CLICK TO CANCEL'
-                    : 'READY FOR ANOTHER DROP'}{' '}
+                    : gunGame
+                      ? 'READY FOR THE NEXT ROUND'
+                      : 'READY FOR ANOTHER DROP'}{' '}
                   <RotateCcw size={22} />
                 </button>
                 <output className="ready-status">
@@ -1886,7 +2068,12 @@ export default function Home() {
           )}
           {panel === 'map' && (
             <>
-              <IslandMap state={state} large />
+              <IslandMap
+                state={state}
+                large
+                room={room}
+                playerId={session?.playerId}
+              />
               <div className="map-legend">
                 <span>
                   <i className="legend-safe" /> Current circle

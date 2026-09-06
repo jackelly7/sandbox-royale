@@ -1,3 +1,12 @@
+import {
+  GUN_COLLIDERS,
+  GUN_RADIUS,
+  arenaStep,
+  arenaGround,
+} from './gun-arena.ts';
+import { gunArenaModel } from './gun-arena-model.ts';
+import { ComebackModels } from './comeback-model.ts';
+import { REBOOT_STATIONS } from './comeback.ts';
 import { BattlefieldEffects } from './battlefield-models.ts';
 import {
   supplyPlan,
@@ -114,6 +123,8 @@ export type GameState = RecoveryState & {
     | 'lost'
     | 'spectating'
     | 'dying';
+  mode?: RoomSnapshot['mode'];
+  scoreboardOpen?: boolean;
   smokes?: number;
   smokeObscured?: boolean;
   supply?: SupplyDrop;
@@ -242,6 +253,75 @@ const names = [
   'Nomad',
 ];
 export class BattleGame {
+  royalePhysics?: { colliders: THREE.Box3[]; solids: THREE.Object3D[] };
+  gunArena?: THREE.Group;
+  arenaActors?: THREE.Group;
+  gunSolids?: THREE.Mesh[];
+  comebackModels?: ComebackModels;
+  setArena(gun: boolean) {
+    if (gun && !this.gunArena) {
+      this.royalePhysics = { colliders: this.colliders, solids: this.solids };
+      this.gunArena = gunArenaModel();
+      this.arenaActors = new THREE.Group();
+      this.scene.add(this.gunArena, this.arenaActors);
+      const material = new THREE.MeshBasicMaterial();
+      this.gunSolids = GUN_COLLIDERS.map((b) => {
+        const mesh = new THREE.Mesh(
+          new THREE.BoxGeometry(
+            b.max[0] - b.min[0],
+            b.max[1] - b.min[1],
+            b.max[2] - b.min[2],
+          ),
+          material,
+        );
+        mesh.position.set(
+          (b.max[0] + b.min[0]) / 2,
+          (b.max[1] + b.min[1]) / 2,
+          (b.max[2] + b.min[2]) / 2,
+        );
+        mesh.updateMatrixWorld(true);
+        return mesh;
+      });
+    }
+    if (this.gunArena) this.gunArena.visible = gun;
+    if (this.arenaActors) this.arenaActors.visible = gun;
+    this.world.visible = !gun;
+    if (gun) {
+      this.colliders = GUN_COLLIDERS.map(
+        (b) =>
+          new THREE.Box3(
+            new THREE.Vector3(...b.min),
+            new THREE.Vector3(...b.max),
+          ),
+      );
+      this.solids = this.gunSolids!;
+    } else if (this.royalePhysics) {
+      this.colliders = this.royalePhysics.colliders;
+      this.solids = this.royalePhysics.solids;
+    }
+    this.physicsCache = undefined;
+    for (const b of this.bots)
+      (gun ? this.arenaActors! : this.world).add(b.mesh);
+    this.state.mode = gun ? 'gun-game' : this.networkRoom?.mode;
+  }
+  showScoreboard(open: boolean) {
+    this.state.scoreboardOpen = open;
+    this.emit();
+  }
+  nearReboot() {
+    const room = this.networkRoom;
+    if (
+      !room?.comebacksOpen ||
+      !room.tokens?.some((t) => t.carriedBy === this.network?.playerId)
+    )
+      return -1;
+    return REBOOT_STATIONS.findIndex(
+      (s) =>
+        canReach(this.position, { ...s, y: 1 }, this.physicsBounds(), 3.6) &&
+        !outsideZone(s.x, s.z, room.zone!),
+    );
+  }
+
   battlefield?: BattlefieldEffects;
   localSmokes: Smoke[] = [];
   localSupply?: SupplyDrop;
@@ -315,6 +395,22 @@ export class BattleGame {
       this.scene.add(this.battlefield.root);
     }
     this.battlefield.update(this.activeSmokes(), supply, now);
+    if (this.networkRoom?.mode === 'duos' && !this.comebackModels) {
+      this.comebackModels = new ComebackModels();
+      this.scene.add(this.comebackModels.root);
+    }
+    if (this.comebackModels) {
+      const me = this.networkRoom?.players.find(
+        (p) => p.id === this.network?.playerId,
+      );
+      this.comebackModels.update(
+        this.networkRoom?.tokens ?? [],
+        me?.team,
+        !!this.networkRoom?.comebacksOpen && this.state.phase !== 'lobby',
+        this.time,
+      );
+    }
+
     this.battlefield.root.visible = this.state.phase !== 'lobby';
     this.state.smokeObscured = smokeBlocks(
       this.camera.position,
@@ -1344,7 +1440,7 @@ export class BattleGame {
   }
   resetBots(count = BOT_COUNT) {
     for (const b of this.bots) {
-      this.world.remove(b.mesh);
+      b.mesh.removeFromParent();
       this.disposeObject(b.mesh);
     }
     this.bots = [];
@@ -1366,7 +1462,10 @@ export class BattleGame {
       const a = (i / count) * Math.PI * 2,
         r = (62 + (i % 4) * 9) * ARENA_SCALE;
       g.position.copy(this.safePosition(Math.sin(a) * r, Math.cos(a) * r));
-      this.world.add(g);
+      (this.isGunGame() && this.arenaActors
+        ? this.arenaActors
+        : this.world
+      ).add(g);
       g.userData.bot = i;
       g.traverse((c) => {
         c.userData.bot = i;
@@ -1394,6 +1493,16 @@ export class BattleGame {
       this.cleanup.push(() => target.removeEventListener(type, fn));
     };
     on(document, 'keydown', ((e: KeyboardEvent) => {
+      if (
+        e.code === 'Tab' &&
+        !this.menuOpen &&
+        this.network &&
+        this.state.phase !== 'lobby'
+      ) {
+        e.preventDefault();
+        if (!e.repeat) this.showScoreboard(true);
+        return;
+      }
       if (
         !this.menuOpen &&
         ['playing', 'spectating'].includes(this.state.phase) &&
@@ -1443,6 +1552,7 @@ export class BattleGame {
       if (!e.repeat && e.code === 'KeyQ') this.heal('medkit');
       if (!e.repeat && e.code === 'KeyF') this.heal('shield');
       if (!e.repeat && e.code === 'KeyX') {
+        this.network?.send({ type: 'cancelReboot' });
         this.cancelHeal();
         this.network?.send({ type: 'cancelRevive' });
       }
@@ -1464,6 +1574,10 @@ export class BattleGame {
       );
     }) as EventListener);
     on(document, 'keyup', ((e: KeyboardEvent) => {
+      if (e.code === 'Tab') {
+        this.showScoreboard(false);
+        return;
+      }
       this.keys.delete(e.code);
     }) as EventListener);
     on(document, 'mousemove', ((e: MouseEvent) => {
@@ -1578,6 +1692,11 @@ export class BattleGame {
       this.mantle
     )
       return;
+    const station = this.nearReboot();
+    if (station >= 0) {
+      this.network?.send({ type: 'reboot', station });
+      return;
+    }
     if (this.nearSupply()) {
       if (this.network) this.network.send({ type: 'supply' });
       else if (this.localSupply) {
@@ -1977,6 +2096,7 @@ export class BattleGame {
     this.emit();
   }
   pause() {
+    this.state.scoreboardOpen = false;
     if (this.state.phase !== 'playing') return;
     this.state.phase = 'paused';
     this.state.mapOpen = false;
@@ -1988,6 +2108,8 @@ export class BattleGame {
     this.emit();
   }
   lobby() {
+    this.setArena(false);
+    this.state.scoreboardOpen = false;
     this.state.phase = 'lobby';
     this.state.mapOpen = false;
     this.state.spectator = null;
@@ -2707,6 +2829,11 @@ export class BattleGame {
         z < b.max.z + 0.48,
     );
   }
+  groundHeight(x: number, z: number, feet: number) {
+    return this.isGunGame()
+      ? arenaGround(x, z, feet)
+      : groundAt(x, z, feet, this.physicsBounds());
+  }
   physicsBounds() {
     if (
       !this.physicsCache ||
@@ -2737,11 +2864,10 @@ export class BattleGame {
     )
       return;
     const floor =
-      groundAt(
+      this.groundHeight(
         this.position.x,
         this.position.z,
         this.position.y - 1.7,
-        this.physicsBounds(),
       ) + 1.7;
     if (Math.abs(this.position.y - floor) > 0.15) return;
     const to = mantleTarget(this.position, this.yaw, this.physicsBounds());
@@ -2758,6 +2884,26 @@ export class BattleGame {
     } else this.velocityY = MOVE.jump;
   }
   move(pos: THREE.Vector3, dx: number, dz: number, feet = 0) {
+    if (this.isGunGame()) {
+      const a = arenaStep(pos.x + dx, pos.z, feet);
+      if (a !== null) {
+        pos.x += dx;
+        pos.y = Math.max(pos.y, a + 1.7);
+        feet = a;
+      }
+      const b = arenaStep(pos.x, pos.z + dz, feet);
+      if (b !== null) {
+        pos.z += dz;
+        pos.y = Math.max(pos.y, b + 1.7);
+      }
+      const length = Math.hypot(pos.x, pos.z);
+      if (length > GUN_RADIUS) {
+        pos.x *= GUN_RADIUS / length;
+        pos.z *= GUN_RADIUS / length;
+      }
+      return;
+    }
+
     const airborneDrop = pos === this.position && this.state.dropping;
     if (
       airborneDrop ||
@@ -3250,11 +3396,10 @@ export class BattleGame {
         if (progress >= 1) this.mantle = undefined;
       } else {
         const floor =
-          groundAt(
+          this.groundHeight(
             this.position.x,
             this.position.z,
             this.position.y - 1.7,
-            this.physicsBounds(),
           ) + 1.7;
         this.velocityY -= 22 * dt;
         this.position.y = Math.max(
@@ -3345,19 +3490,21 @@ export class BattleGame {
       this.autoAmmo();
       const near = this.state.dropping ? undefined : this.nearestLoot();
       this.state.pickup =
-        !this.state.dropping && this.nearSupply()
-          ? 'Open supply drop'
-          : !this.state.dropping && this.nearestChest() >= 0
-            ? 'Open treasure chest'
-            : near
-              ? near.kind < 3
-                ? `${RARITIES[near.rarity].name} ${WEAPONS[near.kind].name}${!this.state.owned[near.kind] ? '' : ' · SWAP'}`
-                : near.kind === 8
-                  ? 'Smoke grenade · H to throw'
-                  : near.kind === 3
-                    ? 'Shield cell · F to use'
-                    : 'Medkit · Q to use'
-              : '';
+        this.nearReboot() >= 0
+          ? 'Bring teammate back'
+          : !this.state.dropping && this.nearSupply()
+            ? 'Open supply drop'
+            : !this.state.dropping && this.nearestChest() >= 0
+              ? 'Open treasure chest'
+              : near
+                ? near.kind < 3
+                  ? `${RARITIES[near.rarity].name} ${WEAPONS[near.kind].name}${!this.state.owned[near.kind] ? '' : ' · SWAP'}`
+                  : near.kind === 8
+                    ? 'Smoke grenade · H to throw'
+                    : near.kind === 3
+                      ? 'Shield cell · F to use'
+                      : 'Medkit · Q to use'
+                : '';
       this.noticeTimer -= dt;
       if (this.noticeTimer <= 0) this.state.notice = '';
     }
@@ -3689,6 +3836,7 @@ export class BattleGame {
       this.state.damageAngle = null;
       this.state.shieldBreak = 0;
       this.state.mapOpen = false;
+      this.state.scoreboardOpen = false;
       this.state.weapon = -1;
       this.state.owned = [...me.owned];
       this.state.tiers = [...(me.tiers ?? [0, 0, 0])];
@@ -3699,12 +3847,13 @@ export class BattleGame {
       this.state.notice = 'The sandbox is ready. Enter the match.';
       this.position.set(me.x, me.y, me.z);
       this.yaw = me.yaw;
-      this.pitch = -0.6;
+      this.pitch = room.mode === 'gun-game' ? 0 : -0.6;
       this.velocityY = 0;
       this.reloadTimer = 0;
       this.meleeAt = -100;
       this.zoneCue = '';
       this.cooldown = 0.3;
+      this.setArena(room.mode === 'gun-game');
       this.resetBots(remotes.length);
       this.spawnLoot();
       this.resetChests(`${room.code}:${room.round}`);
@@ -3722,7 +3871,7 @@ export class BattleGame {
     const oldMe = previousRoom?.players.find((p) => p.id === me.id);
     const respawned =
       !newRound &&
-      room.mode === 'gun-game' &&
+      (me.spawnedAt ?? 0) > 0 &&
       me.health > 0 &&
       me.spawnedAt !== oldMe?.spawnedAt;
     if (respawned) {
@@ -3748,12 +3897,17 @@ export class BattleGame {
       if (['dying', 'spectating', 'lost'].includes(this.state.phase))
         this.state.phase =
           this.touch || document.pointerLockElement ? 'playing' : 'paused';
-      this.notice('Back in the sandbox. Your weapon progress is saved.');
+      this.notice(
+        room.mode === 'gun-game'
+          ? 'Back in the sandbox. Your weapon progress is saved.'
+          : 'Your teammate brought you back. Find a weapon!',
+      );
     }
-    if (this.bots.length !== remotes.length) this.resetBots(remotes.length);
+    const replacedRemotes = this.bots.length !== remotes.length;
+    if (replacedRemotes) this.resetBots(remotes.length);
     this.remoteTargets = remotes.map((p, i) => {
       const b = this.bots[i];
-      if (newRound) b.mesh.position.set(p.x, p.y - 1.7, p.z);
+      if (newRound || replacedRemotes) b.mesh.position.set(p.x, p.y - 1.7, p.z);
       setCharacterSkin(b.mesh, skinIndex(p.name));
       const teammate = room.mode === 'duos' && me.team === p.team;
       const label = `${teammate ? '◆ ' : ''}${p.name}${p.downed ? ' · DOWN' : (p.protectedUntil ?? 0) > room.now ? ' · SAFE' : ''}`;
@@ -3767,7 +3921,7 @@ export class BattleGame {
         !newRound &&
         !teammate &&
         !p.dropping &&
-        p.y <= 1.9 &&
+        Math.abs(p.y - this.groundHeight(p.x, p.z, p.y - 1.7) - 1.7) < 0.2 &&
         !p.downed &&
         p.health > 0 &&
         previous &&
@@ -3992,6 +4146,27 @@ export class BattleGame {
         this.position.distanceTo(new THREE.Vector3(...e.end)) < 22
       )
         this.sound(740, 0.24, 0.045, 'triangle');
+      if (e.type === 'finalWeapon') {
+        const name =
+          room.players.find((p) => p.id === e.player)?.name ?? 'A player';
+        this.addFeed(`${name} reached the final weapon!`, e.id);
+        this.sound(880, 0.4, 0.055, 'triangle');
+      }
+      if (e.type === 'token' && (e.player === me.id || e.target === me.id)) {
+        this.notice(
+          e.player === me.id
+            ? 'Token collected. Reach a comeback station before circle 4.'
+            : 'Your teammate has your token.',
+        );
+        this.sound(660, 0.2, 0.04, 'sine');
+      }
+      if (e.type === 'reboot') {
+        const name =
+          room.players.find((p) => p.id === e.target)?.name ?? 'Teammate';
+        this.addFeed(`${name} is back in the sandbox`, e.id);
+        if (e.player === me.id || e.target === me.id)
+          this.sound(780, 0.3, 0.05, 'triangle');
+      }
       if (e.type === 'shot' && e.player !== me.id && e.end) {
         const p = room.players.find((p) => p.id === e.player);
         if (p) {
@@ -4162,6 +4337,7 @@ export class BattleGame {
     if (document.pointerLockElement === this.renderer.domElement)
       document.exitPointerLock();
     this.disposeObject(this.scene);
+    for (const solid of this.gunSolids ?? []) this.disposeObject(solid);
     for (const t of this.tracers) {
       t.mesh.geometry.dispose();
       (t.mesh.material as THREE.Material).dispose();

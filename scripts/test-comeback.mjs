@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
-import { WEAPONS } from '../lib/game/rules.ts';
+import { REBOOT_STATIONS } from '../lib/game/comeback.ts';
 import { botPath } from '../server/bots.ts';
 const endpoint =
   process.env.MULTIPLAYER_TEST_URL ||
@@ -79,89 +79,82 @@ async function travel(c, target, speed = 1.65) {
   throw new Error('Travel timed out');
 }
 async function walk(c, target) {
-  const path = botPath(mine(c), target, true);
+  const path = botPath(mine(c), target);
   assert.ok(path.length, 'Reachable test destination');
   for (const point of path) await travel(c, point, 0.8);
   await travel(c, target, 0.8);
 }
 try {
-  const host = await connect(await post('/rooms', { name: 'Gun Game QA' }));
-  const friend = await connect(
-    await post(`/rooms/${host.session.code}/join`, {
-      name: 'Gun Game Witness QA',
+  const carrier = await connect(
+    await post('/rooms', { name: 'Comeback Carrier QA' }),
+  );
+  const attacker = await connect(
+    await post(`/rooms/${carrier.session.code}/join`, {
+      name: 'Comeback Rival QA',
     }),
   );
-  host.send({ type: 'mode', mode: 'gun-game' });
-  await friend.until((r) => r.mode === 'gun-game');
-  host.send({ type: 'start' });
-  await host.until((r) => r.phase === 'playing' && r.now - r.startAt > 2000);
-  assert.equal(mine(host).weapon, 3);
-  assert.equal(mine(friend).weapon, 3);
-  assert.equal(host.room.busDuration, 0);
-  assert.equal(host.room.drops.length, 0);
+  const victim = await connect(
+    await post(`/rooms/${carrier.session.code}/join`, {
+      name: 'Comeback Return QA',
+    }),
+  );
+  carrier.send({ type: 'mode', mode: 'duos' });
+  await victim.until((r) => r.mode === 'duos');
+  carrier.send({ type: 'start' });
+  await carrier.until(
+    (r) => r.phase === 'playing' && r.now - r.startAt >= 8000,
+  );
+  for (const c of [carrier, attacker, victim]) c.send({ type: 'jumpBus' });
+  await Promise.all(
+    [carrier, attacker, victim].map((c) => c.until(() => !mine(c).onBus)),
+  );
   await Promise.all([
-    walk(host, { x: 0, z: 27 }),
-    walk(friend, { x: 0, z: 22 }),
+    travel(carrier, { x: 8, z: 50 }),
+    travel(attacker, { x: 0, z: 52.2 }),
+    travel(victim, { x: 0, z: 50 }),
   ]);
-  for (let i = 0; i < 3; i++) {
-    host.send({
-      type: 'shoot',
-      pose: { ...mine(host), yaw: 0, pitch: 0 },
-      aiming: true,
+  await Promise.all(
+    [carrier, attacker, victim].map((c) => c.until(() => !mine(c).dropping)),
+  );
+  const deadline = Date.now() + 25000;
+  while (mine(victim).health > 0 && Date.now() < deadline) {
+    const a = mine(attacker),
+      v = mine(victim);
+    attacker.send({
+      type: 'melee',
+      pose: { ...a, yaw: Math.atan2(-(v.x - a.x), -(v.z - a.z)), pitch: 0 },
     });
-    await wait(350);
+    await wait(750);
   }
-  await friend.until(() => mine(friend).health < 100);
-  const hurt = mine(friend).health;
-  await friend.until(
-    () => mine(friend).regenerating && mine(friend).health > hurt,
+  await victim.until(() => mine(victim).health === 0);
+  await carrier.until((r) =>
+    r.tokens.some((t) => t.player === victim.session.playerId),
   );
-  await friend.until(() => mine(friend).health === 100);
-  assert.equal(mine(friend).shield, 0, 'Only health regenerates');
-  async function eliminate(attacker, victim) {
-    const stage = mine(attacker).gunStage,
-      limit = Date.now() + 20000;
-    while (mine(victim).health > 0 && Date.now() < limit) {
-      const a = mine(attacker),
-        b = mine(victim),
-        distance = Math.hypot(b.x - a.x, b.z - a.z);
-      attacker.send({
-        type: 'shoot',
-        pose: {
-          ...a,
-          yaw: Math.atan2(-(b.x - a.x), -(b.z - a.z)),
-          pitch: Math.atan2(b.y - a.y, distance),
-        },
-        aiming: true,
-      });
-      await wait(WEAPONS[a.weapon].interval * 1000 + 110);
-    }
-    await attacker.until(() => mine(attacker).gunStage === stage + 1);
-    await victim.until(
-      () => mine(victim).health === 0 && mine(victim).respawnAt > 0,
-    );
-    assert.equal(attacker.room.phase, 'playing');
-    await victim.until(
-      () => mine(victim).health === 100 && mine(victim).respawnAt === 0,
-    );
-    await victim.until((r) => r.now > mine(victim).protectedUntil);
-  }
-  await eliminate(host, friend);
-  assert.equal(mine(host).weapon, 4);
-  assert.equal(mine(friend).gunStage, 0);
-  await walk(friend, { x: 0, z: 22 });
-  await eliminate(friend, host);
-  assert.equal(mine(host).gunStage, 1);
-  assert.equal(mine(host).weapon, 4);
-  const late = await connect(
-    await post(`/rooms/${host.session.code}/join`, { name: 'Late Gunner QA' }),
+  assert.equal(
+    attacker.room.tokens.length,
+    0,
+    'Enemy cannot see teammate token',
   );
-  assert.equal(mine(late).spectator, false);
-  assert.equal(mine(late).weapon, 3);
-  const listed = await fetch(endpoint + '/rooms').then((r) => r.json());
-  assert.ok(JSON.stringify(listed).includes('gun-game'));
+  await travel(carrier, mine(victim), 0.8);
+  await carrier.until((r) =>
+    r.tokens.some((t) => t.carriedBy === carrier.session.playerId),
+  );
+  const station = REBOOT_STATIONS[0];
+  await walk(carrier, { x: station.x, z: station.z + 2 });
+  carrier.send({ type: 'reboot', station: 0 });
+  await carrier.until(
+    () => mine(carrier).rebooting === victim.session.playerId,
+  );
+  await victim.until(
+    () => mine(victim).health === 100 && mine(victim).comebackUsed,
+  );
+  assert.equal(mine(victim).weapon, -1);
+  assert.equal(mine(victim).shield, 0);
+  assert.equal(mine(victim).rank, 0);
+  assert.equal(mine(victim).deaths, 1);
+  await carrier.until((r) => r.tokens.length === 0);
   console.log(
-    'PASS live courtyard, damage-free regeneration, two-way eliminations, weapon advancement, synchronized respawns, saved progress, and immediate late join',
+    'PASS live duos elimination, private token, automatic retrieval, station channel, and synchronized unarmed comeback',
   );
 } finally {
   for (const c of clients) {

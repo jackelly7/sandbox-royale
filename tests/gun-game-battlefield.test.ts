@@ -1,3 +1,5 @@
+import { GUN_RADIUS, GUN_COLLIDERS } from '../lib/game/gun-arena.ts';
+import { blocksBody } from '../lib/game/movement.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
@@ -58,8 +60,10 @@ void test('Gun Game starts equipped inside clear arena spawns, without bus, stor
   for (const p of r.players) {
     assert.equal(p.weapon, 3);
     assert.equal(p.owned.filter(Boolean).length, 1);
-    assert.ok(!p.dropping && !p.onBus && !blocked(p.x, p.z));
-    assert.ok(Math.hypot(p.x, p.z) < 80);
+    assert.ok(
+      !p.dropping && !p.onBus && !blocksBody(p.x, p.z, 0, GUN_COLLIDERS),
+    );
+    assert.ok(Math.hypot(p.x, p.z) < GUN_RADIUS);
   }
   assert.ok(
     Math.hypot(
@@ -67,13 +71,13 @@ void test('Gun Game starts equipped inside clear arena spawns, without bus, stor
       r.players[0].z - r.players[1].z,
     ) > 30,
   );
-  assert.equal(snapshot(r, 8000).zone!.radius, 80);
+  assert.equal(snapshot(r, 8000).zone!.radius, GUN_RADIUS);
   assert.deepEqual(parseCommand({ type: 'mode', mode: 'gun-game' }), {
     type: 'mode',
     mode: 'gun-game',
   });
   const spawn = gunSpawn(r.players, 7);
-  assert.ok(!blocked(spawn.x, spawn.z));
+  assert.ok(!blocksBody(spawn.x, spawn.z, 0, GUN_COLLIDERS));
 });
 
 void test('every elimination advances once; death preserves progress and respawns; final weapon wins', () => {
@@ -101,7 +105,7 @@ void test('every elimination advances once; death preserves progress and respawn
     assert.equal(b.shield, 50);
     assert.equal(b.weapon, 3);
     assert.equal(b.rank, 0);
-    assert.ok(!blocked(b.x, b.z));
+    assert.ok(!blocksBody(b.x, b.z, 0, GUN_COLLIDERS));
     damageMember(r, b, 999, now + 3001, a);
     assert.equal(b.health, 100, 'Respawn protection');
     now += 5000;
@@ -127,7 +131,7 @@ void test('Gun Game uses authoritative shots, reports the fired weapon across pr
   Object.assign(a, {
     x: 0,
     y: 1.7,
-    z: 55,
+    z: 27,
     yaw: 0,
     pitch: 0,
     protectedUntil: 0,
@@ -135,12 +139,12 @@ void test('Gun Game uses authoritative shots, reports the fired weapon across pr
   Object.assign(b, {
     x: 0,
     y: 1.7,
-    z: 50,
+    z: 22,
     health: 10,
     shield: 0,
     protectedUntil: 0,
   });
-  assert.ok(canReach(a, b, MAP.colliders, 10));
+  assert.ok(canReach(a, b, GUN_COLLIDERS, 10));
   applyCommand(r, a.id, { type: 'shoot', pose: { ...a }, aiming: true }, 8000);
   assert.equal(a.weapon, 4);
   assert.equal(a.ammo[4], WEAPONS[4].capacity);
@@ -161,8 +165,16 @@ void test('Gun Game uses authoritative shots, reports the fired weapon across pr
 
 void test('bots fight each other, advance guns, and respawn in Gun Game', () => {
   const r = room('gun-game', 4);
-  for (let now = 8050; now < 98000 && r.phase === 'playing'; now += 50)
+  let botElimination = false;
+  for (let now = 8050; now < 98000 && r.phase === 'playing'; now += 50) {
     tick(r, now);
+    botElimination ||= r.events.some(
+      (e) =>
+        e.type === 'elimination' &&
+        e.player.startsWith('bot-') &&
+        e.target?.startsWith('bot-'),
+    );
+  }
   const bots = r.players.filter((p) => p.bot);
   assert.ok(
     bots.some((p) => (p.gunStage ?? 0) > 0),
@@ -172,15 +184,7 @@ void test('bots fight each other, advance guns, and respawn in Gun Game', () => 
     bots.some((p) => (p.spawnedAt ?? 0) > 6000),
     'Bots respawned',
   );
-  assert.ok(
-    r.events.some(
-      (e) =>
-        e.type === 'elimination' &&
-        e.player.startsWith('bot-') &&
-        e.target?.startsWith('bot-'),
-    ),
-    'Bots eliminate other bots',
-  );
+  assert.ok(botElimination, 'Bots eliminate other bots');
 });
 
 void test('supply drops vary predictably, land in the upcoming circle, and can only be opened once at close range', () => {

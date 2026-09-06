@@ -1,6 +1,8 @@
 import { smokeBlocks } from '../lib/game/battlefield.ts';
 import { GLIDE_SPEED } from '../lib/game/traversal.ts';
 import { MAP } from '../lib/game/map-data.ts';
+import { GUN_RADIUS, GUN_COLLIDERS } from '../lib/game/gun-arena.ts';
+import { REBOOT_STATIONS } from '../lib/game/comeback.ts';
 import { ARENA_RADIUS } from '../lib/game/arena.ts';
 import { CHEST_SPOTS, canReach } from '../lib/game/chests.ts';
 import { floorAvailable, floorRarity } from '../lib/game/loot.ts';
@@ -10,18 +12,18 @@ import { zoneAt, outsideZone } from '../lib/game/zones.ts';
 import { applyCommand, type Room, type Member } from './model.ts';
 type Point = { x: number; z: number };
 const cells = new Map<string, boolean>();
-function clear(x: number, z: number) {
-  const key = `${x},${z}`;
+function clear(x: number, z: number, gun = false) {
+  const key = `${gun}:${x},${z}`;
   let result = cells.get(key);
   if (result === undefined) {
     result =
-      Math.hypot(x, z) < ARENA_RADIUS - 2 &&
-      !blocksBody(x, z, 0, MAP.colliders);
+      Math.hypot(x, z) < (gun ? GUN_RADIUS : ARENA_RADIUS) - 2 &&
+      !blocksBody(x, z, 0, gun ? GUN_COLLIDERS : MAP.colliders);
     cells.set(key, result);
   }
   return result;
 }
-function segment(a: Point, b: Point) {
+function segment(a: Point, b: Point, gun = false) {
   const n = Math.ceil(Math.hypot(a.x - b.x, a.z - b.z) / 0.6);
   for (let i = 1; i <= n; i++)
     if (
@@ -29,15 +31,15 @@ function segment(a: Point, b: Point) {
         a.x + ((b.x - a.x) * i) / n,
         a.z + ((b.z - a.z) * i) / n,
         0,
-        MAP.colliders,
+        gun ? GUN_COLLIDERS : MAP.colliders,
       )
     )
       return false;
   return true;
 }
 // Bounded A*: paths are retained in room state and rebuilt at most every four seconds.
-export function botPath(from: Point, to: Point): Point[] {
-  if (segment(from, to)) return [to];
+export function botPath(from: Point, to: Point, gun = false): Point[] {
+  if (segment(from, to, gun)) return [to];
   const snap = (p: Point) => ({
     x: Math.round(p.x / 3) * 3,
     z: Math.round(p.z / 3) * 3,
@@ -54,7 +56,7 @@ export function botPath(from: Point, to: Point): Point[] {
     for (let i = 1; i < open.length; i++)
       if (open[i].f < open[index].f) index = i;
     const p = open.splice(index, 1)[0];
-    if (Math.hypot(p.x - goal.x, p.z - goal.z) < 4 && segment(p, to)) {
+    if (Math.hypot(p.x - goal.x, p.z - goal.z) < 4 && segment(p, to, gun)) {
       end = p;
       break;
     }
@@ -69,7 +71,7 @@ export function botPath(from: Point, to: Point): Point[] {
       [-3, -3],
     ]) {
       const q = { x: p.x + dx, z: p.z + dz };
-      if (!clear(q.x, q.z) || !segment(p, q)) continue;
+      if (!clear(q.x, q.z, gun) || !segment(p, q, gun)) continue;
       const g = p.g + Math.hypot(dx, dz),
         k = key(q);
       if (g >= (best.get(k) ?? Infinity)) continue;
@@ -84,7 +86,7 @@ export function botPath(from: Point, to: Point): Point[] {
     path.unshift({ x: end.x, z: end.z });
     end = parent.get(key(end))!;
   }
-  if (segment(from, start)) path.unshift(start);
+  if (segment(from, start, gun)) path.unshift(start);
   return path;
 }
 function command(
@@ -96,9 +98,16 @@ function command(
   applyCommand(room, p.id, c, now, true);
 }
 export function updateRoomBots(room: Room, now: number, dt: number) {
+  const gun = room.mode === 'gun-game',
+    boxes = gun ? GUN_COLLIDERS : MAP.colliders;
   const zone =
     room.mode === 'gun-game'
-      ? { x: 0, z: 0, radius: 65, next: { x: 0, z: 0, radius: 65 } }
+      ? {
+          x: 0,
+          z: 0,
+          radius: GUN_RADIUS,
+          next: { x: 0, z: 0, radius: GUN_RADIUS },
+        }
       : zoneAt(
           Math.max(0, (now - room.startAt) / 1000 - (room.busDuration ?? 0)),
           `${room.code}:${room.round}`,
@@ -172,14 +181,35 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
           q.downed &&
           q.health > 0,
       );
+      const token = room.tokens?.find(
+        (t) =>
+          t.team === p.team &&
+          t.player !== p.id &&
+          (!t.carriedBy || t.carriedBy === p.id),
+      );
+      const station =
+        token?.carriedBy === p.id
+          ? REBOOT_STATIONS.map((s, i) => ({ ...s, index: i }))
+              .filter((s) => !outsideZone(s.x, s.z, zone))
+              .sort(
+                (a, b) =>
+                  Math.hypot(a.x - p.x, a.z - p.z) -
+                  Math.hypot(b.x - p.x, b.z - p.z),
+              )[0]
+          : undefined;
       if (
         outsideZone(p.x, p.z, { ...zone, radius: Math.max(2, zone.radius - 8) })
       )
         ai.goal = { x: zone.next.x, z: zone.next.z };
       else if (mate) {
         ai.goal = { x: mate.x, z: mate.z };
-        if (canReach(p, { ...mate, y: 1.7 }, MAP.colliders, 3))
+        if (canReach(p, { ...mate, y: 1.7 }, boxes, 3))
           command(room, p, { type: 'revive', target: mate.id }, now);
+      } else if (token && (station || !token.carriedBy)) {
+        const target = station ?? token;
+        ai.goal = { x: target.x, z: target.z };
+        if (station && canReach(p, { ...station, y: 1 }, boxes, 3.6))
+          command(room, p, { type: 'reboot', station: station.index }, now);
       } else if ((needsGun || !usable) && (loot || chest)) {
         const useChest =
           chest &&
@@ -188,10 +218,7 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
               Math.hypot(loot.x - p.x, loot.z - p.z));
         const target = useChest ? chest : loot!;
         ai.goal = { x: target.x, z: target.z };
-        if (
-          !p.dropping &&
-          canReach(p, { ...target, y: 0.9 }, MAP.colliders, 3.6)
-        ) {
+        if (!p.dropping && canReach(p, { ...target, y: 0.9 }, boxes, 3.6)) {
           if (useChest)
             command(room, p, { type: 'chest', index: chest.index }, now);
           else if (loot && loot.kind < 5)
@@ -203,10 +230,10 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
         Math.hypot(loot.x - p.x, loot.z - p.z) < 20
       ) {
         ai.goal = { x: loot.x, z: loot.z };
-        if (canReach(p, { ...loot, y: 0.9 }, MAP.colliders, 3.6))
+        if (canReach(p, { ...loot, y: 0.9 }, boxes, 3.6))
           command(room, p, { type: 'pickup', index: loot.index }, now);
       } else if (enemy) ai.goal = { x: enemy.x, z: enemy.z };
-      if (!p.dropping && !p.reviving) {
+      if (!p.dropping && !p.reviving && !p.rebooting) {
         if (p.health < 65 && p.medkits && !p.healing)
           command(room, p, { type: 'heal', item: 'medkit' }, now);
         else if (p.shield < 40 && p.cells && !p.healing)
@@ -233,7 +260,7 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
             canReach(
               { ...p, y: p.y - 0.35 },
               { ...enemy, y: enemy.y - 0.4 },
-              MAP.colliders,
+              boxes,
               WEAPONS[weapon].range,
             );
           if (visible) {
@@ -257,11 +284,11 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
         }
       }
       if (ai.goal && !p.dropping && now >= (ai.pathAt ?? 0)) {
-        ai.path = botPath(p, ai.goal);
+        ai.path = botPath(p, ai.goal, gun);
         ai.pathAt = now + 4000;
       }
     }
-    if (p.reviving) continue;
+    if (p.reviving || p.rebooting) continue;
     const goal = p.dropping ? ai.goal : ai.path?.[0];
     if (!goal || (!ai.goal && !p.dropping)) continue;
     const distance = Math.hypot(goal.x - p.x, goal.z - p.z);
@@ -275,7 +302,7 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
     );
     const x = p.x + ((goal.x - p.x) / distance) * step,
       z = p.z + ((goal.z - p.z) / distance) * step;
-    if (p.dropping || segment(p, { x, z })) {
+    if (p.dropping || segment(p, { x, z }, gun)) {
       p.x = x;
       p.z = z;
     } else ai.pathAt = 0;

@@ -200,7 +200,9 @@ export function FriendsRoom({
           {room.mode === 'gun-game' && (
             <p>
               8 weapons. Every elimination advances your gun. Respawn in 3
-              seconds with your progress saved. Finish the lineup to win.
+              seconds with your progress saved. Fight in the Sandcastle
+              Courtyard. Health recovers after 5 seconds without damage. Hold
+              Tab for scores.
             </p>
           )}
           <span>Bot opponents</span>
@@ -224,7 +226,11 @@ export function FriendsRoom({
           </p>
           {room.mode === 'duos' && (
             <>
-              <p>Choose the same team as your friend. Two players per team.</p>
+              <p>
+                Choose the same team as your friend. Two players per team. Each
+                player gets one comeback: retrieve their token and use a marked
+                station before circle 4.
+              </p>
               <div className="team-options">
                 {[0, 1, 2, 3].map((team) => (
                   <button

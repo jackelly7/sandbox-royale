@@ -1,8 +1,10 @@
 import { WEAPONS } from './rules.ts';
-import { MAP } from './map-data.ts';
+import { GUN_SPAWNS } from './gun-arena.ts';
+export { GUN_RADIUS } from './gun-arena.ts';
 export const GUN_LADDER = [3, 4, 1, 0, 5, 6, 2, 7];
 export const GUN_RESPAWN_MS = 3000;
-export const GUN_RADIUS = 80;
+export const REGEN_DELAY = 5000,
+  REGEN_PER_SECOND = 20;
 export function gunLoadout(stage: number) {
   const weapon = GUN_LADDER[Math.min(stage, GUN_LADDER.length - 1)];
   return {
@@ -18,7 +20,7 @@ export function gunSpawn(
   players: { x: number; z: number; health: number }[],
   salt = 0,
 ) {
-  const points = MAP.loot.filter((p) => Math.hypot(p.x, p.z) < GUN_RADIUS - 12);
+  const points = GUN_SPAWNS;
   const alive = players.filter((p) => p.health > 0);
   return [...points].sort((a, b) => {
     const score = (p: { x: number; z: number }) =>
