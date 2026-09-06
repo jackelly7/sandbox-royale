@@ -1,3 +1,4 @@
+import { isArenaMode, isTeamMode } from '../lib/game/modes.ts';
 import { smokeBlocks } from '../lib/game/battlefield.ts';
 import { GLIDE_SPEED } from '../lib/game/traversal.ts';
 import { MAP } from '../lib/game/map-data.ts';
@@ -98,20 +99,19 @@ function command(
   applyCommand(room, p.id, c, now, true);
 }
 export function updateRoomBots(room: Room, now: number, dt: number) {
-  const gun = room.mode === 'gun-game',
+  const gun = isArenaMode(room.mode),
     boxes = gun ? GUN_COLLIDERS : MAP.colliders;
-  const zone =
-    room.mode === 'gun-game'
-      ? {
-          x: 0,
-          z: 0,
-          radius: GUN_RADIUS,
-          next: { x: 0, z: 0, radius: GUN_RADIUS },
-        }
-      : zoneAt(
-          Math.max(0, (now - room.startAt) / 1000 - (room.busDuration ?? 0)),
-          `${room.code}:${room.round}`,
-        );
+  const zone = isArenaMode(room.mode)
+    ? {
+        x: 0,
+        z: 0,
+        radius: GUN_RADIUS,
+        next: { x: 0, z: 0, radius: GUN_RADIUS },
+      }
+    : zoneAt(
+        Math.max(0, (now - room.startAt) / 1000 - (room.busDuration ?? 0)),
+        `${room.code}:${room.round}`,
+      );
   for (const p of room.players) {
     if (room.phase !== 'playing') return;
     if (!p.bot || p.health <= 0 || p.onBus || p.downed) continue;
@@ -126,7 +126,7 @@ export function updateRoomBots(room: Room, now: number, dt: number) {
           !q.spectator &&
           !q.onBus &&
           !smokeBlocks(p, q, room.smokes ?? [], now - room.startAt) &&
-          (room.mode !== 'duos' || q.team !== p.team),
+          (!isTeamMode(room.mode) || q.team !== p.team),
       );
       const enemy = enemies.sort(
         (a, b) =>

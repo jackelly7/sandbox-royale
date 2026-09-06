@@ -9,6 +9,11 @@ export function chestModel() {
     body.box(0.14, 0.88, 1.14, '#ffcc4d', x, 0.48, 0);
   body.box(0.28, 0.32, 0.13, '#ffdc63', 0, 0.84, 0.6);
   body.box(0.08, 0.12, 0.025, '#45332c', 0, 0.85, 0.68);
+  for (const y of [0.24, 0.5, 0.72])
+    body.add(new THREE.PlaneGeometry(1.62, 0.018), '#9c532c', 0, y, 0.57);
+  for (const x of [-0.56, 0.56])
+    for (const y of [0.2, 0.72])
+      body.add(new THREE.PlaneGeometry(0.04, 0.045), '#fff2af', x, y, 0.61);
   root.add(body.finish());
   const top = modelKit('Chest lid');
   top.box(1.7, 0.4, 1.15, '#e59a4a', 0, 0.16, 0.55);

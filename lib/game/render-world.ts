@@ -33,14 +33,25 @@ export function batchIsland(
       if (name !== 'position' && name !== 'normal' && name !== 'color')
         geometry.deleteAttribute(name);
     const count = geometry.getAttribute('position').count;
+    const positions = geometry.getAttribute('position');
+    const normals = geometry.getAttribute('normal');
+    geometry.computeBoundingBox();
+    const low = geometry.boundingBox!.min.y,
+      height = Math.max(0.01, geometry.boundingBox!.max.y - low);
     const colors = new Float32Array(count * 3);
     const tint = object.material.color;
     for (let i = 0; i < count; i++) {
-      colors[i * 3] = tint.r * (existingColors ? existingColors.getX(i) : 1);
+      const shade = existingColors
+        ? 1
+        : 0.84 +
+          (0.12 * (positions.getY(i) - low)) / height +
+          0.04 * Math.max(0, normals.getY(i));
+      colors[i * 3] =
+        tint.r * (existingColors ? existingColors.getX(i) : shade);
       colors[i * 3 + 1] =
-        tint.g * (existingColors ? existingColors.getY(i) : 1);
+        tint.g * (existingColors ? existingColors.getY(i) : shade);
       colors[i * 3 + 2] =
-        tint.b * (existingColors ? existingColors.getZ(i) : 1);
+        tint.b * (existingColors ? existingColors.getZ(i) : shade);
     }
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     const point = new THREE.Vector3().setFromMatrixPosition(object.matrixWorld);

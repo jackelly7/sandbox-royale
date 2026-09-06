@@ -92,3 +92,17 @@ Sandcastle Square and Bucket Town now have four doorways, separate roof collisio
 Four more enterable shelters at Block Fort, Toy Grove, North Rim, and the southern hut bring the total to six interiors. Both castles, all four shelters, and all eight landing sectors have guaranteed chests. Ammo has its own rifle, shell, or sniper cartridge model with no tall beacon. Walking within 2.5m collects it automatically, subject to walls, height and reserve limits. Swapped weapons do not grant ammo; eliminations drop carried ammo as separate stacks. The first empty magazine loads from newly collected ammo; normal reloads remain timed.
 
 The first two zone phases are 40s wait/30s close and 25s wait/30s close. Later phases are unchanged. The AR fires every 0.2s, has wider hip spread, starts losing damage beyond 35m, and stops at 115m. Shotgun buckshot is strongest within 8m and falls to zero at 24m. Sniper rounds retain damage to 180m. Shared-rule tests check close/mid/far weapon roles, ammo conservation, automatic collection and deliberate rarity downgrades.
+
+### Party play update
+
+Friends rooms support Solo Royale, Duos, Gun Game, and Team Deathmatch. At the end of a match, each connected player can vote for the next mode and ready up. The leading vote starts through the existing five-second countdown. Ties favor the current mode, then the displayed mode order. The room code and completed session scores survive mode changes.
+
+Team Deathmatch uses the courtyard, two balanced teams, no friendly fire, three-second respawns, and a 30-elimination team goal. Choose any of the eight weapons in the room or pause menu. A selection applies at the next spawn, or during current spawn protection. Reserve ammunition is unlimited; magazines still require reloading. Arena spawn selection considers enemy sightlines, proximity, occupied points, and recent deaths.
+
+Practice Range is available from the homepage and between rounds in friends rooms. It parks the network gameplay connection while keeping the room client alive, then restores it when a real round starts. Keys 1–8 and the wheel select weapons. Targets show actual per-shot damage and distance. Practice never awards match kills or changes room loadouts.
+
+Settings save look/aim sensitivity, crosshair color/size, hold/toggle sprint and crouch, and the Battle Royale 1–3 weapon order on the device. Audio and visual-footstep preferences also persist.
+
+Visual updates use baked vertex shading and batched details, animated limb pivots and torso breathing, team uniforms, weapon sway and landing motion. Impact debris and casings share a fixed 96-instance pool and one draw call. Existing geometry budgets remain enforced by tests; these checks do not measure device frame rates.
+
+`node scripts/test-party-play.mjs` checks live Team Deathmatch, respawns, late joining, a shared team result, mode votes, and session continuity. It creates temporary QA rooms and closes its clients on exit.

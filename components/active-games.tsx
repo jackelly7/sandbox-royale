@@ -1,4 +1,5 @@
 'use client';
+import { isArenaMode, MODE_NAMES } from '../lib/game/modes';
 import { useEffect, useState } from 'react';
 import { ArrowRight, RefreshCw, Users } from 'lucide-react';
 import { MultiplayerClient } from '@/lib/game/network';
@@ -94,7 +95,7 @@ export function ActiveGames({
         ) : rooms.length ? (
           rooms.map((room) => {
             const watching =
-              room.mode !== 'gun-game' &&
+              !isArenaMode(room.mode) &&
               (room.phase === 'playing' || room.phase === 'countdown');
             const own = room.code === currentCode;
             return (
@@ -103,8 +104,8 @@ export function ActiveGames({
                   <strong>{room.hostName}&apos;s room</strong>
                   <span>
                     <Users size={13} />{' '}
-                    {room.mode === 'gun-game'
-                      ? 'Gun Game'
+                    {isArenaMode(room.mode)
+                      ? MODE_NAMES[room.mode]
                       : room.mode === 'duos'
                         ? 'Duos'
                         : 'Solo'}{' '}
@@ -118,7 +119,7 @@ export function ActiveGames({
                         ? 'Between rounds'
                         : room.phase === 'countdown'
                           ? 'Starting now'
-                          : room.mode === 'gun-game'
+                          : isArenaMode(room.mode)
                             ? 'Weapon race in progress'
                             : `${room.alive} remaining`}
                   </small>

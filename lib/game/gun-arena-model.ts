@@ -25,7 +25,7 @@ export function gunArenaModel() {
     k.box(0.35, 1.7, 0.35, '#fff0c4', side * 18.5, 4.4, -4);
     k.box(9.3, 0.35, 0.35, '#fff0c4', side * 23, 5.25, -4);
     k.box(0.15, 3, 0.15, '#685948', side * 23, 5, -5);
-    k.box(2.2, 1, 0.1, side < 0 ? '#46a6d5' : '#bf72ce', side * 23 + 1, 6, -5);
+    k.box(2.2, 1, 0.1, side < 0 ? '#46a6d5' : '#eb8c70', side * 23 + 1, 6, -5);
   }
   for (let x = -36; x <= 36; x += 4)
     for (const z of [-34, 34]) k.box(2.2, 0.9, 2, '#f1d9a5', x, 7.45, z);
@@ -33,5 +33,17 @@ export function gunArenaModel() {
   for (const x of [-14, 14])
     for (let z = -28; z <= 28; z += 3)
       k.box(0.08, 0.015, 1.4, '#d4b681', x, 0.015, z);
+  // Striped fort trim and corner bolts share the existing single mesh.
+  for (const side of [-1, 1])
+    for (let i = -1; i <= 1; i++)
+      k.box(
+        0.5,
+        0.18,
+        0.035,
+        side < 0 ? '#b1e6ff' : '#ffcab0',
+        side * 23 + i * 1.8,
+        3.9,
+        -6.02,
+      );
   return k.finish();
 }

@@ -5,11 +5,13 @@ export const SKINS = [
   { suit: '#d67a53', light: '#ffd18a', skin: '#efbd8b' },
   { suit: '#727ab8', light: '#c5b9f0', skin: '#7d513c' },
   { suit: '#c1a54e', light: '#efe1a2', skin: '#d7976d' },
+  { suit: '#308ecd', light: '#a8e4ff', skin: '#bc825e' },
+  { suit: '#e07d60', light: '#ffd1a7', skin: '#7d513c' },
 ];
 export function skinIndex(name: string) {
   let hash = 0;
   for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return hash % SKINS.length;
+  return hash % 4;
 }
 function buildCharacterModel(index: number) {
   const root = new THREE.Group();
@@ -34,12 +36,32 @@ function buildCharacterModel(index: number) {
   body.box(0.23, 0.09, 0.055, s.light, 0.17, 1.43, 0.246);
   body.box(0.42, 0.5, 0.18, dark, 0, 1.34, -0.29);
   body.box(0.76, 0.09, 0.43, dark, 0, 0.92, 0);
+  // Visor glint, backpack straps and a sandbox badge stay in the body batch.
+  body.add(new THREE.PlaneGeometry(0.15, 0.025), '#ecfff5', -0.08, 2.055, 0.27);
+  for (const side of [-1, 1]) {
+    body.add(
+      new THREE.PlaneGeometry(0.065, 0.55),
+      dark,
+      side * 0.23,
+      1.3,
+      0.24,
+    );
+    body.add(
+      new THREE.PlaneGeometry(0.12, 0.16),
+      s.light,
+      side * 0.17,
+      1.13,
+      0.27,
+    );
+  }
+  body.add(new THREE.PlaneGeometry(0.1, 0.08), '#ffdc86', 0, 1.52, 0.265);
   root.add(body.finish());
   for (const side of [-1, 1]) {
     const leg = modelKit(side < 0 ? 'Left leg' : 'Right leg');
     leg.box(0.25, 0.61, 0.27, dark, 0, -0.3, 0, 0.035);
     leg.box(0.26, 0.15, 0.055, s.suit, 0, -0.28, 0.16);
     leg.box(0.28, 0.19, 0.38, dark, 0, -0.69, 0.04);
+    leg.add(new THREE.PlaneGeometry(0.28, 0.035), s.light, 0, -0.77, 0.235);
     const l = leg.finish();
     l.position.set(side * 0.22, 0.84, 0);
     root.add(l);
@@ -88,10 +110,20 @@ export function animateCharacter(
     (root.userData.rig = bodyParts
       .slice(1)
       .map((name) => root.getObjectByName(name)));
+  const body = root.getObjectByName('Body');
+  if (body) {
+    body.position.y =
+      Math.sin(phase * 2) * amount * 0.035 + Math.sin(phase * 0.23) * 0.008;
+    body.rotation.z = Math.sin(phase) * amount * 0.025;
+  }
   rig.forEach((part: THREE.Object3D | undefined, i: number) => {
-    if (part)
-      part.rotation.x =
-        Math.sin(phase + (i % 2) * Math.PI) * amount * (i < 2 ? 1 : 0.55);
+    if (part) {
+      const step = Math.sin(phase + (i % 2) * Math.PI);
+      part.rotation.x = step * amount * (i < 2 ? 1 : 0.55);
+      part.position.y =
+        (i < 2 ? 0.84 : 1.6) + (i < 2 ? Math.max(0, -step) * amount * 0.07 : 0);
+      part.rotation.z = i < 2 ? 0 : Math.sin(phase * 0.23) * 0.015;
+    }
   });
 }
 

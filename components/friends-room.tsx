@@ -1,4 +1,6 @@
 'use client';
+import { ModeVote, LoadoutPicker } from './party-controls';
+import { MODES, MODE_NAMES, isArenaMode } from '../lib/game/modes';
 import { useState } from 'react';
 import {
   ArrowRight,
@@ -27,6 +29,7 @@ export function FriendsRoom({
   enter,
   leave,
   command,
+  practice,
 }: {
   room: RoomSnapshot | null;
   session: RoomSession | null;
@@ -37,6 +40,7 @@ export function FriendsRoom({
   enter: (name: string, code?: string) => void;
   leave: () => void;
   command: (command: Command) => void;
+  practice?: () => void;
 }) {
   const [name, setName] = useState(''),
     [code, setCode] = useState(inviteCode),
@@ -182,18 +186,14 @@ export function FriendsRoom({
         <div className="room-mode-controls">
           <span>Match mode {isHost ? '' : '· chosen by host'}</span>
           <div className="mode-options">
-            {(['solo', 'duos', 'gun-game'] as const).map((mode) => (
+            {MODES.map((mode) => (
               <button
                 key={mode}
                 disabled={!isHost || status !== 'connected'}
                 aria-pressed={(room.mode ?? 'solo') === mode}
                 onClick={() => command({ type: 'mode', mode })}
               >
-                {mode === 'gun-game'
-                  ? 'Gun Game'
-                  : mode === 'solo'
-                    ? 'Free for all'
-                    : 'Duos'}
+                {MODE_NAMES[mode]}
               </button>
             ))}
           </div>
@@ -204,6 +204,21 @@ export function FriendsRoom({
               Courtyard. Health recovers after 5 seconds without damage. Hold
               Tab for scores.
             </p>
+          )}
+          {room.mode === 'team-deathmatch' && (
+            <>
+              <p>
+                Blue vs Coral in the Sandcastle Courtyard. First to 30 team
+                eliminations. No friendly fire. Respawn in 3 seconds; health
+                recovers after 5 seconds without damage.
+              </p>
+              <LoadoutPicker
+                room={room}
+                playerId={session.playerId}
+                send={command}
+                disabled={status !== 'connected'}
+              />
+            </>
           )}
           <span>Bot opponents</span>
           <div className="mode-options">
@@ -268,6 +283,9 @@ export function FriendsRoom({
             <div>
               {p.name}
               {room?.mode === 'duos' && <small>TEAM {(p.team ?? 0) + 1}</small>}
+              {room?.mode === 'team-deathmatch' && (
+                <small>{p.team === 0 ? 'BLUE' : 'CORAL'}</small>
+              )}
               {p.id === session.playerId && <small>YOU</small>}
             </div>
             {p.id === room.host && <Crown size={15} />}
@@ -317,16 +335,25 @@ export function FriendsRoom({
               : isHost
                 ? room?.mode === 'gun-game'
                   ? 'Everyone starts with a pistol. Ready to race?'
-                  : 'Everyone here joins the match. Ready to drop?'
+                  : room.mode === 'team-deathmatch'
+                    ? 'Teams are balanced at the start. Choose your weapon above.'
+                    : 'Everyone here joins the match. Ready to drop?'
                 : 'The host will start the match when everyone is here.'}
           </p>
         </>
       )}
       {room?.phase === 'finished' && (
         <>
+          <ModeVote
+            room={room}
+            playerId={session.playerId}
+            send={command}
+            disabled={status !== 'connected'}
+          />
           <div className="room-winner">
-            {room.players.find((p) => p.id === room.winner)?.name ?? 'No one'}{' '}
-            was last in the sandbox.
+            {room.mode === 'team-deathmatch'
+              ? `${room.winningTeam === 0 ? 'Blue' : 'Coral'} team won the round.`
+              : `${room.players.find((p) => p.id === room.winner)?.name ?? 'No one'} was last in the sandbox.`}
           </div>
           <button
             className="deploy-button"
@@ -335,7 +362,7 @@ export function FriendsRoom({
           >
             {room.players.find((p) => p.id === session?.playerId)?.ready
               ? 'READY · CLICK TO CANCEL'
-              : 'READY FOR NEXT DROP'}
+              : 'READY FOR NEXT ROUND'}
             <ArrowRight size={22} />
           </button>
           <p className="touch-help">
@@ -344,17 +371,23 @@ export function FriendsRoom({
                 .length
             }
             /{room.players.filter((p) => p.connected && !p.bot).length} ready.
-            The next drop starts when everyone is ready.
+            The next round starts when everyone is ready.
           </p>
         </>
       )}
       {(room?.phase === 'playing' || room?.phase === 'countdown') && (
         <p className="touch-help">
-          {room.mode === 'gun-game'
-            ? 'Close this panel and enter the match. You can join Gun Game while a round is running.'
+          {isArenaMode(room.mode)
+            ? 'Close this panel and enter the match. You can join arena modes while a round is running.'
             : 'The match is in progress. Close this panel to watch surviving players from the results screen. Stay in the room for the next round.'}
         </p>
       )}
+      {practice &&
+        (room?.phase === 'waiting' || room?.phase === 'finished') && (
+          <button className="secondary-button" onClick={practice}>
+            Practice while you wait
+          </button>
+        )}
       <button className="text-button" onClick={leave}>
         <LogOut size={16} />
         Leave room

@@ -1,3 +1,4 @@
+import type { GameMode } from './modes.ts';
 import type { ComebackToken } from './comeback.ts';
 import type { Smoke, SupplyDrop } from './battlefield.ts';
 import type { ChestState } from './chests.ts';
@@ -23,6 +24,7 @@ export type Player = PlayerPose &
     shield: number;
     kills: number;
     deaths?: number;
+    loadout?: number;
     lastDamageAt?: number;
     regenerating?: boolean;
     comebackUsed?: boolean;
@@ -87,8 +89,11 @@ export type RoomSnapshot = {
   drops?: WorldDrop[];
   chests?: ChestState[];
   events: GameEvent[];
-  mode?: 'solo' | 'duos' | 'gun-game';
+  mode?: GameMode;
   winningTeam?: number | null;
+  teamScores?: number[];
+  votes?: Record<string, GameMode>;
+  nextMode?: GameMode;
   botCount?: number;
   busDuration?: number;
   smokes?: Smoke[];
@@ -144,12 +149,14 @@ export type Command =
   | { type: 'chest'; index: number }
   | { type: 'jumpBus' }
   | { type: 'bots'; count: number }
+  | { type: 'vote'; mode: GameMode }
+  | { type: 'loadout'; weapon: number }
   | { type: 'ready' }
   | { type: 'start' }
   | { type: 'rematch' }
   | { type: 'leave' }
   | { type: 'ping' }
-  | { type: 'mode'; mode: 'solo' | 'duos' | 'gun-game' }
+  | { type: 'mode'; mode: GameMode }
   | { type: 'team'; team: number }
   | { type: 'revive'; target: string }
   | { type: 'cancelRevive' }
@@ -161,7 +168,7 @@ export type Command =
 // Room controls and squad actions are validated by the authoritative server.
 export type RoomSession = { code: string; playerId: string; token: string };
 export type ActiveRoom = {
-  mode: 'solo' | 'duos' | 'gun-game';
+  mode: GameMode;
   code: string;
   hostName: string;
   phase: RoomSnapshot['phase'];

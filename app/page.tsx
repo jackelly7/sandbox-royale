@@ -1,4 +1,17 @@
 'use client';
+import { isArenaMode } from '@/lib/game/modes';
+import {
+  DEFAULT_PREFERENCES,
+  readPreferences,
+  savePreferences,
+  type Preferences,
+} from '@/lib/game/preferences';
+import {
+  ModeVote,
+  TeamScore,
+  LoadoutPicker,
+  PersonalControls,
+} from '@/components/party-controls';
 import {
   BUS_SECONDS,
   BUS_FROM,
@@ -44,7 +57,6 @@ import {
   DialogDescription,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import type { BattleGame, GameState } from '@/lib/game/engine';
 import { FriendsRoom } from '@/components/friends-room';
@@ -140,7 +152,21 @@ function IslandMap({
   room?: RoomSnapshot | null;
   playerId?: string;
 }) {
-  if (worldState.mode === 'gun-game')
+  if (worldState.practice)
+    return (
+      <svg viewBox="-18 -50 36 100" aria-label="Practice range map">
+        <rect x="-15" y="-45" width="30" height="90" fill="#d9bd89" />
+        {[
+          [-8, 20],
+          [0, -5],
+          [8, -40],
+        ].map(([x, z]) => (
+          <circle key={x} cx={x} cy={z} r="1.5" fill="#245b69" />
+        ))}
+        <circle cx={worldState.x} cy={worldState.z} r="1.2" fill="#fff" />
+      </svg>
+    );
+  if (isArenaMode(worldState.mode))
     return <GunArenaMap state={worldState} large={large} />;
   const circle = (c: { x: number; z: number; radius: number }) => ({
     ...c,
@@ -455,8 +481,14 @@ export default function Home() {
     'controls' | 'settings' | 'map' | 'friends' | null
   >(null);
   const [visualSound, setVisualSound] = useState(true);
+  const [preferences, setPreferences] =
+    useState<Preferences>(DEFAULT_PREFERENCES);
+  const updatePreferences = (p: Preferences) => {
+    setPreferences(p);
+    savePreferences(p);
+    game.current?.setPreferences(p);
+  };
   const [muted, setMuted] = useState(false),
-    [sensitivity, setSensitivity] = useState(1),
     [touch, setTouch] = useState(false),
     [best, setBest] = useState(0);
   const client = useRef<MultiplayerClient | null>(null);
@@ -521,7 +553,16 @@ export default function Home() {
       setRoomBusy(false);
     }
   };
+  const practice = () => {
+    setPanel(null);
+    void game.current?.startPractice(touch);
+  };
   const backToLobby = () => {
+    if (state.practice) {
+      game.current?.stopPractice();
+      if (session) setPanel('friends');
+      return;
+    }
     if (client.current) leaveRoom();
     else game.current?.lobby();
   };
@@ -552,6 +593,11 @@ export default function Home() {
               } catch {}
             }
           });
+          const saved = readPreferences();
+          setPreferences(saved);
+          game.current.setPreferences(saved);
+          setMuted(saved.muted);
+          setVisualSound(saved.visualSound);
           setReady(true);
           const invite = new URLSearchParams(window.location.search).get(
             'room',
@@ -590,9 +636,11 @@ export default function Home() {
     lobby = state.phase === 'lobby',
     ended =
       (state.phase === 'won' || state.phase === 'lost') &&
-      !(room?.mode === 'gun-game' && room.phase === 'playing'),
+      !(isArenaMode(room?.mode) && room?.phase === 'playing'),
     spectating = state.phase === 'spectating';
-  const gunGame = room?.mode === 'gun-game';
+  const gunGame = room?.mode === 'gun-game' && !state.practice;
+  const teamGame = room?.mode === 'team-deathmatch' && !state.practice;
+  const arenaGame = isArenaMode(room?.mode) || !!state.practice;
   const ownPlayer = room?.players.find((p) => p.id === session?.playerId);
   const teammate =
     room?.mode === 'duos'
@@ -627,6 +675,12 @@ export default function Home() {
     .padStart(2, '0')}:${(time % 60).toString().padStart(2, '0')}`;
   return (
     <main
+      style={
+        {
+          '--reticle-color': preferences.crosshairColor,
+          '--reticle-size': preferences.crosshairSize,
+        } as React.CSSProperties
+      }
       className={`game-shell ${playing || spectating ? 'is-playing' : ''} ${lobby ? 'is-lobby' : ''}`}
     >
       <div
@@ -703,7 +757,7 @@ export default function Home() {
                 onClick={() => setPanel('friends')}
               >
                 <Users size={17} />
-                {session ? 'OPEN FRIEND ROOM' : 'FRIENDS / GUN GAME'}
+                {session ? 'OPEN FRIEND ROOM' : 'PLAY WITH FRIENDS'}
                 <ArrowRight size={17} />
               </button>
               <div className="match-facts">
@@ -747,6 +801,13 @@ export default function Home() {
               }}
             />
           </div>
+          <button
+            className="practice-lobby-button secondary-button"
+            disabled={!ready}
+            onClick={practice}
+          >
+            PRACTICE RANGE <Crosshair size={18} />
+          </button>
           <footer className="lobby-footer">
             <div className="deployment-card">
               <div className="mode-icon">
@@ -883,8 +944,14 @@ export default function Home() {
           <div className="match-status">
             <span>
               <Users size={17} />
-              <b>{gunGame ? room?.players.length : state.alive}</b>{' '}
-              {gunGame ? 'PLAYERS' : 'ALIVE'}
+              <b>
+                {arenaGame
+                  ? state.practice
+                    ? 1
+                    : room?.players.length
+                  : state.alive}
+              </b>{' '}
+              {arenaGame ? 'PLAYERS' : 'ALIVE'}
             </span>
             <span>
               <Skull size={17} />
@@ -903,11 +970,13 @@ export default function Home() {
             <div className={`storm-timer ${state.outside ? 'danger' : ''}`}>
               <span className="storm-symbol">◉</span>
               <span>
-                {gunGame
-                  ? 'SANDCASTLE COURTYARD'
-                  : zone.stage === 'final'
-                    ? 'FINAL CIRCLE'
-                    : `ZONE ${zone.phase} · ${zone.stage === 'waiting' ? 'CLOSES IN' : 'CLOSING'}`}
+                {state.practice
+                  ? 'PRACTICE RANGE'
+                  : arenaGame
+                    ? 'SANDCASTLE COURTYARD'
+                    : zone.stage === 'final'
+                      ? 'FINAL CIRCLE'
+                      : `ZONE ${zone.phase} · ${zone.stage === 'waiting' ? 'CLOSES IN' : 'CLOSING'}`}
               </span>
               <b>{zone.stage === 'final' ? '' : clock}</b>
             </div>
@@ -1215,14 +1284,15 @@ export default function Home() {
           {state.smokeObscured && (
             <div className="smoke-overlay" aria-hidden="true" />
           )}
-          {gunGame &&
+          {arenaGame &&
             room?.phase === 'playing' &&
             (state.respawnRemaining ?? 0) > 0 && (
               <div className="gun-respawn">
                 BACK IN THE SANDBOX IN {Math.ceil(state.respawnRemaining!)}
                 <small>
-                  Weapon progress saved ·{' '}
-                  {WEAPONS[GUN_LADDER[Math.min(state.gunStage ?? 0, 7)]].name}
+                  {teamGame
+                    ? 'Returning to your team'
+                    : `Weapon progress saved · ${WEAPONS[GUN_LADDER[Math.min(state.gunStage ?? 0, 7)]].name}`}
                 </small>
               </div>
             )}
@@ -1236,27 +1306,33 @@ export default function Home() {
                 #{state.rank} · {state.kills} eliminations
               </p>
               <small>
-                {gunGame
-                  ? 'Respawning shortly. Weapon progress saved.'
-                  : session
-                    ? 'Switching to spectator view...'
-                    : 'Your run has ended.'}
+                {teamGame
+                  ? 'Respawning shortly. Your team is still fighting.'
+                  : arenaGame
+                    ? 'Respawning shortly. Weapon progress saved.'
+                    : session
+                      ? 'Switching to spectator view...'
+                      : 'Your run has ended.'}
               </small>
             </section>
           )}
-          {playing && !gunGame && state.health <= 30 && state.health > 0 && (
+          {playing && !arenaGame && state.health <= 30 && state.health > 0 && (
             <div className="low-health">
               <Heart size={16} /> LOW HEALTH ·{' '}
               {state.medkits > 0 ? 'Q TO HEAL' : 'FIND A MEDKIT'}
             </div>
           )}
-          {playing && gunGame && state.health < 100 && state.health > 0 && (
-            <div className="regen-status">
-              {ownPlayer?.regenerating
-                ? 'HEALTH RECOVERING'
-                : `RECOVERY IN ${Math.max(0, Math.ceil(((ownPlayer?.lastDamageAt ?? 0) + 5000 - (room?.now ?? 0)) / 1000))}s WITHOUT DAMAGE`}
-            </div>
-          )}
+          {playing &&
+            arenaGame &&
+            !state.practice &&
+            state.health < 100 &&
+            state.health > 0 && (
+              <div className="regen-status">
+                {ownPlayer?.regenerating
+                  ? 'HEALTH RECOVERING'
+                  : `RECOVERY IN ${Math.max(0, Math.ceil(((ownPlayer?.lastDamageAt ?? 0) + 5000 - (room?.now ?? 0)) / 1000))}s WITHOUT DAMAGE`}
+              </div>
+            )}
           {room?.mode === 'duos' && room.phase === 'playing' && (
             <div className="comeback-status">
               {!room.comebacksOpen
@@ -1423,12 +1499,32 @@ export default function Home() {
                 <div className="player-label">
                   YOU{' '}
                   <span>
-                    {gunGame ? 'GUN GAME' : session ? 'BATTLE ROYALE' : 'SOLO'}
+                    {state.practice
+                      ? 'PRACTICE'
+                      : teamGame
+                        ? 'TEAM DEATHMATCH'
+                        : gunGame
+                          ? 'GUN GAME'
+                          : session
+                            ? 'BATTLE ROYALE'
+                            : 'SOLO'}
                   </span>
                 </div>
               </div>
               <div className="loadout">
-                {gunGame ? (
+                {state.practice ? (
+                  <div className="gun-progress">
+                    <strong>PRACTICE RANGE</strong>
+                    <small>1–8 / WHEEL · ALL WEAPONS</small>
+                  </div>
+                ) : teamGame ? (
+                  <div className="gun-progress">
+                    <strong>
+                      {ownPlayer?.team === 0 ? 'BLUE TEAM' : 'CORAL TEAM'}
+                    </strong>
+                    <small>30 TEAM ELIMINATIONS TO WIN</small>
+                  </div>
+                ) : gunGame ? (
                   <div className="gun-progress">
                     <strong>
                       WEAPON {Math.min((state.gunStage ?? 0) + 1, 8)} / 8 ·{' '}
@@ -1515,7 +1611,7 @@ export default function Home() {
                 <div className="weapon-slots">
                   {WEAPONS.map(
                     (w, i) =>
-                      (gunGame ? i === state.weapon : i < 3) && (
+                      (arenaGame ? i === state.weapon : i < 3) && (
                         <button
                           key={w.name}
                           className={`weapon-slot ${state.weapon === i ? 'selected' : ''} ${!state.owned[i] ? 'unowned' : ''}`}
@@ -1529,7 +1625,9 @@ export default function Home() {
                           }
                           onClick={() => game.current?.selectWeapon(i)}
                         >
-                          <kbd>{gunGame ? '◆' : i + 1}</kbd>
+                          <kbd>
+                            {arenaGame ? '◆' : preferences.slots.indexOf(i) + 1}
+                          </kbd>
                           <Crosshair size={22} />
                           <span>
                             {w.short}
@@ -1549,7 +1647,7 @@ export default function Home() {
                   {state.reloading
                     ? 'RELOADING'
                     : state.weapon >= 0
-                      ? `${gunGame ? 'GUN GAME' : RARITIES[state.tiers?.[state.weapon] ?? 0].name} · ${WEAPONS[state.weapon].short}`
+                      ? `${arenaGame ? (state.practice ? 'PRACTICE' : teamGame ? 'TEAM DEATHMATCH' : 'GUN GAME') : RARITIES[state.tiers?.[state.weapon] ?? 0].name} · ${WEAPONS[state.weapon].short}`
                       : 'FISTS'}
                 </span>
                 <div>
@@ -1558,7 +1656,7 @@ export default function Home() {
                       ? '—'
                       : String(state.ammo).padStart(2, '0')}
                   </b>
-                  <span>/ {gunGame ? '∞' : state.reserve}</span>
+                  <span>/ {arenaGame ? '∞' : state.reserve}</span>
                 </div>
                 <small>
                   {state.weapon < 0 ? (
@@ -1570,7 +1668,11 @@ export default function Home() {
                   ) : (
                     <>
                       <kbd>R</kbd> RELOAD · <kbd>B</kbd> MELEE{' '}
-                      {gunGame ? '' : '· 1–3 / WHEEL'}
+                      {state.practice
+                        ? '· 1–8 / WHEEL'
+                        : arenaGame
+                          ? ''
+                          : '· 1–3 / WHEEL'}
                     </>
                   )}
                 </small>
@@ -1695,21 +1797,74 @@ export default function Home() {
           )}
         </>
       )}
+      {state.practice && !lobby && (
+        <section className="practice-hud">
+          <strong>PRACTICE RANGE</strong>
+          <span>
+            {state.practiceHit
+              ? `${Math.round(state.practiceHit.damage)} damage · ${state.practiceHit.distance}m${state.practiceHit.headshot ? ' · HEADSHOT' : ''}`
+              : 'Shoot a target to see damage and distance'}
+          </span>
+          <select
+            aria-label="Practice weapon"
+            value={state.weapon}
+            onChange={(e) => game.current?.selectWeapon(Number(e.target.value))}
+          >
+            {WEAPONS.map((w, i) => (
+              <option key={w.name} value={i}>
+                {i + 1}. {w.name}
+              </option>
+            ))}
+          </select>
+          <button onClick={backToLobby}>
+            Return to {session ? 'room' : 'lobby'}
+          </button>
+        </section>
+      )}
+      {teamGame && (playing || spectating) && room && <TeamScore room={room} />}
+      {playing &&
+        arenaGame &&
+        !state.practice &&
+        (ownPlayer?.protectedUntil ?? 0) > (room?.now ?? 0) && (
+          <div className="spawn-safe">
+            SPAWN PROTECTION ·{' '}
+            {Math.ceil(
+              ((ownPlayer?.protectedUntil ?? 0) - (room?.now ?? 0)) / 1000,
+            )}
+            s · ENDS WHEN YOU ATTACK
+          </div>
+        )}
       {state.phase === 'paused' && (
         <section className="pause-overlay">
           <div className="pause-panel">
             <div className="eyebrow">
               {session ? 'FRIEND MATCH' : 'TAKE A BREATHER'}
             </div>
-            <h2>{session ? 'READY TO DROP?' : 'MATCH PAUSED.'}</h2>
+            <h2>
+              {state.practice
+                ? 'PRACTICE PAUSED'
+                : arenaGame
+                  ? 'READY TO PLAY?'
+                  : session
+                    ? 'READY TO DROP?'
+                    : 'MATCH PAUSED.'}
+            </h2>
             <p>
               {session
                 ? 'The match keeps running while this menu is open.'
                 : 'The sandbox can wait.'}
             </p>
             {state.notice.includes('mouse') && <p>{state.notice}</p>}
+            {teamGame && room && (
+              <LoadoutPicker
+                room={room}
+                playerId={session?.playerId}
+                send={(c) => client.current?.send(c)}
+                disabled={connection !== 'connected'}
+              />
+            )}
             <button className="deploy-button" onClick={start}>
-              {session ? 'ENTER MATCH' : 'RESUME'}{' '}
+              {session && !state.practice ? 'ENTER MATCH' : 'RESUME'}{' '}
               <Play size={22} fill="currentColor" />
             </button>
             <button
@@ -1753,11 +1908,13 @@ export default function Home() {
             </div>
             <h2>
               {state.phase === 'won'
-                ? gunGame
-                  ? 'GUN GAME\nCHAMPION.'
-                  : room?.mode === 'duos'
-                    ? 'LAST DUO IN\nTHE SANDBOX.'
-                    : 'LAST ONE IN\nTHE SANDBOX.'
+                ? teamGame
+                  ? `${ownPlayer?.team === 0 ? 'BLUE' : 'CORAL'} TEAM WINS!`
+                  : gunGame
+                    ? 'GUN GAME\nCHAMPION.'
+                    : room?.mode === 'duos'
+                      ? 'LAST DUO IN\nTHE SANDBOX.'
+                      : 'LAST ONE IN\nTHE SANDBOX.'
                 : 'BACK TO THE\nSANDBOX?'}
             </h2>
             <p className="result-context">
@@ -1790,7 +1947,7 @@ export default function Home() {
                     .toString()
                     .padStart(2, '0')}
                 </b>
-                <span>{gunGame ? 'MATCH TIME' : 'SURVIVED'}</span>
+                <span>{arenaGame ? 'MATCH TIME' : 'SURVIVED'}</span>
               </div>
             </div>
             {session && room?.phase === 'playing' && state.phase === 'lost' && (
@@ -1849,6 +2006,12 @@ export default function Home() {
               )}
             {session && room?.phase === 'finished' && (
               <div className="rematch-ready">
+                <ModeVote
+                  room={room}
+                  playerId={session.playerId}
+                  send={(c) => client.current?.send(c)}
+                  disabled={connection !== 'connected'}
+                />
                 <div
                   className="ready-players"
                   aria-label="Players ready for next round"
@@ -1868,7 +2031,7 @@ export default function Home() {
                 >
                   {ownPlayer?.ready
                     ? 'READY · CLICK TO CANCEL'
-                    : gunGame
+                    : arenaGame
                       ? 'READY FOR THE NEXT ROUND'
                       : 'READY FOR ANOTHER DROP'}{' '}
                   <RotateCcw size={22} />
@@ -1882,7 +2045,7 @@ export default function Home() {
                   ready.{' '}
                   {room.players.filter((p) => p.connected).length < 2
                     ? 'Invite a friend to play again.'
-                    : 'The next drop starts when everyone is ready.'}
+                    : 'The next round starts when everyone is ready.'}
                 </output>
               </div>
             )}
@@ -1929,11 +2092,12 @@ export default function Home() {
               : panel === 'controls'
                 ? 'Find supplies, stay inside the storm, and outlast your rivals.'
                 : panel === 'settings'
-                  ? 'Set up your next drop.'
+                  ? 'Choose a mode, invite friends, and play.'
                   : 'Sandcastle Square. Find cover, loot, and your next landing spot.'}
           </DialogDescription>
           {panel === 'friends' && (
             <FriendsRoom
+              practice={practice}
               room={room}
               session={session}
               status={connection}
@@ -2008,21 +2172,9 @@ export default function Home() {
                   }
                 />
               </div>
-              <div className="setting-label">
-                <span id="sensitivity-label">Look sensitivity</span>
-                <span>{sensitivity.toFixed(1)}×</span>
-              </div>
-              <Slider
-                aria-labelledby="sensitivity-label"
-                min={0.3}
-                max={2.5}
-                step={0.1}
-                value={[sensitivity]}
-                onValueChange={(v) => {
-                  const n = Array.isArray(v) ? v[0] : v;
-                  setSensitivity(n);
-                  if (game.current) game.current.sensitivity = n;
-                }}
+              <PersonalControls
+                value={preferences}
+                onChange={updatePreferences}
               />
               <div className="setting-row">
                 <div>
@@ -2034,7 +2186,7 @@ export default function Home() {
                   checked={!muted}
                   onCheckedChange={(v) => {
                     setMuted(!v);
-                    if (game.current) game.current.muted = !v;
+                    updatePreferences({ ...preferences, muted: !v });
                   }}
                 />
               </div>
@@ -2046,7 +2198,10 @@ export default function Home() {
                 <Switch
                   id="visual-sound-switch"
                   checked={visualSound}
-                  onCheckedChange={setVisualSound}
+                  onCheckedChange={(v) => {
+                    setVisualSound(v);
+                    updatePreferences({ ...preferences, visualSound: v });
+                  }}
                 />
               </div>
               <div className="setting-row">

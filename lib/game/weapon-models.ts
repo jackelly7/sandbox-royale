@@ -20,6 +20,14 @@ function buildWeaponModel(
     black = '#142026',
     pale = '#e6e1cb';
   const accent = RARITIES[rarity].color;
+  if (detail === 'held') {
+    for (const side of [-1, 1]) {
+      box(0.008, 0.022, 0.09, pale, side * 0.092, -0.015, 0.07);
+      for (let rib = 0; rib < 3; rib++)
+        box(0.008, 0.012, 0.06, edge, side * 0.068, -0.17 - rib * 0.025, 0.11);
+    }
+    box(0.035, 0.025, 0.08, black, 0, -0.1, 0.06);
+  }
   if (index >= 3) {
     const accent = WEAPONS[index].color;
     if (index === 3 || index === 7) {

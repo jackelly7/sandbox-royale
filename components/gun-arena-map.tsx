@@ -49,6 +49,19 @@ export function GunArenaMap({
           </text>
         </>
       )}
+      {state.squadPoints?.map((p, i) => (
+        <g key={i}>
+          <circle
+            cx={p.x}
+            cy={p.z}
+            r="1.2"
+            fill="#71edc9"
+            stroke="#163d38"
+            strokeWidth=".4"
+          />
+          <title>{p.name}</title>
+        </g>
+      ))}
       {state.pingPoints?.map((p) => (
         <circle key={p.id} cx={p.x} cy={p.z} r="1.4" fill="#ffdb6c" />
       ))}

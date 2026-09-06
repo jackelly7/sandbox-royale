@@ -1,3 +1,4 @@
+import { TeamScore } from './party-controls';
 import type { RoomSnapshot } from '../lib/game/multiplayer';
 import { GUN_LADDER } from '../lib/game/gun-game';
 import { WEAPONS } from '../lib/game/rules';
@@ -16,7 +17,10 @@ export function MatchScoreboard({
     .sort((a, b) =>
       gun
         ? (b.gunStage ?? 0) - (a.gunStage ?? 0) || b.kills - a.kills
-        : (b.health > 0 ? 1 : 0) - (a.health > 0 ? 1 : 0) || b.kills - a.kills,
+        : room.mode === 'team-deathmatch'
+          ? b.kills - a.kills || (a.deaths ?? 0) - (b.deaths ?? 0)
+          : (b.health > 0 ? 1 : 0) - (a.health > 0 ? 1 : 0) ||
+            b.kills - a.kills,
     );
   const scores = [...(room.scores ?? [])].sort(
     (a, b) => b.wins - a.wins || b.kills - a.kills,
@@ -34,6 +38,7 @@ export function MatchScoreboard({
           ×
         </button>
       </header>
+      {room.mode === 'team-deathmatch' && <TeamScore room={room} />}
       <div className="score-scroll">
         <table>
           <thead>
@@ -51,6 +56,11 @@ export function MatchScoreboard({
                 <td>
                   <b>{i + 1}.</b> {p.name}
                   {p.id === playerId ? ' · YOU' : ''}
+                  {room.mode === 'team-deathmatch'
+                    ? p.team === 0
+                      ? ' · BLUE'
+                      : ' · CORAL'
+                    : ''}
                   <small>
                     {!p.connected
                       ? 'OFFLINE'
