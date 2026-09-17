@@ -41,6 +41,24 @@ Map collision data comes from the same geometry rendered in the browser. After c
 
 The live WebSocket server lives in `server/index.ts` and deploys to the Neon project in `server/deployment.json`. Build its bundle with `npm run server:build`. For a local server, set `DATABASE_URL` and run `npm run server:dev`; point `REALTIME_URL` at `ws://localhost:3001/ws`. The HTTP synchronization path remains available for integration and fallback diagnostics.
 
+## Contributing
+
+The repository is private to the Sandbox cohort. Ask Jack for a collaborator invite, then:
+
+```sh
+git clone https://github.com/jackelly7/sandbox-royale.git
+cd sandbox-royale
+npm install
+cp .dev.vars.example .dev.vars   # fill in MULTIPLAYER_DATABASE_URL
+npm run dev
+```
+
+Solo play against AI works without a database. `MULTIPLAYER_DATABASE_URL` is only needed for friend rooms; apply `server/schema.sql` to that database before the first run. Never commit `.dev.vars` — it is gitignored, and only `.dev.vars.example` is tracked.
+
+Branch off `main`, keep `npm test`, `npx tsc --noEmit`, `npm run lint` and `npm run build` green, and open a pull request. After changing island geometry, run `npm run map:export` and commit the regenerated data so server collision matches what the browser renders.
+
+The fonts and logo under `public/brand` are licensed Sandbox assets. They stay inside this private repository and must not be redistributed.
+
 ## Check
 
 ```sh
