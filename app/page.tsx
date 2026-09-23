@@ -123,7 +123,7 @@ const controls = [
   ['MOUSE', 'Look around'],
   ['LEFT CLICK', 'Fire / punch when unarmed'],
   ['B', 'Melee attack'],
-  ['RIGHT CLICK / RIGHT ⌘', 'Aim down sights'],
+  ['RIGHT CLICK / Z', 'Aim down sights'],
   ['SHIFT', 'Sprint'],
   ['C / CTRL', 'Toggle crouch / hold crouch'],
   ['SPACE', 'Jump from bus / jump / mantle'],

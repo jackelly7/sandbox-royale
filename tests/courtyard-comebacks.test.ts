@@ -394,3 +394,64 @@ void test('a revived duos client leaves spectating and offers entry at the stati
     g.disposeObject(g.world);
   }
 });
+
+void test('Gun Game slides along courtyard walls instead of rejecting all movement', () => {
+  const r = game(),
+    p = r.players[0];
+  const g = Object.create(BattleGame.prototype) as BattleGame;
+  Object.assign(g, { networkRoom: { mode: 'gun-game' } });
+  Object.assign(p, { x: 36, z: 10, y: 1.7, credit: 8, moveAt: 8000 });
+  const client = new THREE.Vector3(p.x, p.y, p.z);
+  g.move(client, 1, 1, 0);
+  applyCommand(r, p.id, { type: 'pose', pose: { ...p, x: 37, z: 11 } }, 8050);
+  assert.ok(
+    p.z > 10.9,
+    'Keep forward movement even when a wall blocks sideways movement',
+  );
+  assert.ok(p.x < 36.55, 'Do not pass through the courtyard wall');
+  assert.ok(Math.abs(client.x - p.x) < 1e-6);
+  assert.ok(Math.abs(client.z - p.z) < 1e-6);
+  assert.ok(!blocksBody(p.x, p.z, p.y - 1.7, GUN_COLLIDERS));
+  const blocked = new THREE.Vector3(36, 1.7, 10);
+  g.move(blocked, 8, 0, 0);
+  assert.ok(blocked.x < 36.55, 'A long frame cannot tunnel through a wall');
+});
+
+void test('Gun Game ignores movement and shots from a previous life after respawn', () => {
+  const r = game(),
+    p = r.players[0];
+  const previousLife = p.spawnedAt;
+  damageMember(r, p, 999, 8000, r.players[1]);
+  tick(r, 11000);
+  assert.notEqual(p.spawnedAt, previousLife);
+  const spawn = { x: p.x, z: p.z, ammo: p.ammo[p.weapon], shotAt: p.shotAt };
+  applyCommand(
+    r,
+    p.id,
+    {
+      type: 'shoot',
+      aiming: false,
+      pose: { ...p, x: p.x + 1, spawnedAt: previousLife },
+    },
+    11500,
+  );
+  assert.equal(p.x, spawn.x);
+  assert.equal(p.z, spawn.z);
+  assert.equal(
+    p.ammo[p.weapon],
+    spawn.ammo,
+    'A queued old shot cannot fire after respawn',
+  );
+  assert.equal(p.shotAt, spawn.shotAt);
+  applyCommand(
+    r,
+    p.id,
+    { type: 'shoot', aiming: false, pose: { ...p } },
+    11501,
+  );
+  assert.equal(
+    p.ammo[p.weapon],
+    spawn.ammo - 1,
+    'Current-life inputs still work',
+  );
+});

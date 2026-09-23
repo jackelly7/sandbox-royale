@@ -6,7 +6,7 @@ import { practiceRange } from './practice-range.ts';
 import {
   GUN_COLLIDERS,
   GUN_RADIUS,
-  arenaStep,
+  arenaMove,
   arenaGround,
 } from './gun-arena.ts';
 import { gunArenaModel } from './gun-arena-model.ts';
@@ -203,6 +203,8 @@ export type GameState = RecoveryState & {
 };
 type Bot = {
   mesh: THREE.Group;
+  remoteId?: string;
+  remoteTarget?: THREE.Vector3;
   hp: number;
   shield: number;
   cooldown: number;
@@ -1610,48 +1612,72 @@ export class BattleGame {
       this.disposeObject(b.mesh);
     }
     this.bots = [];
-    for (let i = 0; i < count; i++) {
-      const g = characterModel(i % 4);
-      const held = weaponModel(i % 3);
-      held.name = 'Bot weapon';
-      held.userData.weapon = i % 3;
-      held.scale.setScalar(0.8);
-      held.rotation.y = Math.PI;
-      held.position.set(0.35, 1.35, 0.25);
-      held.visible = false;
-      g.add(held);
-      const chute = parachuteModel();
-      chute.visible = false;
-      g.add(chute);
-      const tag = this.nameTag(names[i] ?? 'Player');
-      if (tag) g.add(tag);
-      const a = (i / count) * Math.PI * 2,
-        r = (62 + (i % 4) * 9) * ARENA_SCALE;
-      g.position.copy(this.safePosition(Math.sin(a) * r, Math.cos(a) * r));
-      (this.isGunGame() && this.arenaActors
-        ? this.arenaActors
-        : this.world
-      ).add(g);
-      g.userData.bot = i;
-      g.traverse((c) => {
-        c.userData.bot = i;
-      });
-      this.bots.push({
-        mesh: g,
-        hp: 100,
-        shield: 50,
-        cooldown: 2 + i * 0.2,
-        target: null,
-        thinkAt: i * 0.025,
-        seed: i * 0.7,
-        name: names[i],
-        tag,
-        armed: false,
-        dropping: false,
-        dying: 0,
-        deathY: 0,
-      });
+    for (let i = 0; i < count; i++) this.bots.push(this.createBot(i, count));
+  }
+  createBot(i: number, count: number): Bot {
+    const g = characterModel(i % 4);
+    const held = weaponModel(i % 3);
+    held.name = 'Bot weapon';
+    held.userData.weapon = i % 3;
+    held.scale.setScalar(0.8);
+    held.rotation.y = Math.PI;
+    held.position.set(0.35, 1.35, 0.25);
+    held.visible = false;
+    g.add(held);
+    const chute = parachuteModel();
+    chute.visible = false;
+    g.add(chute);
+    const tag = this.nameTag(names[i] ?? 'Player');
+    if (tag) g.add(tag);
+    const a = (i / count) * Math.PI * 2,
+      r = (62 + (i % 4) * 9) * ARENA_SCALE;
+    g.position.copy(this.safePosition(Math.sin(a) * r, Math.cos(a) * r));
+    (this.isGunGame() && this.arenaActors ? this.arenaActors : this.world).add(
+      g,
+    );
+    g.userData.bot = i;
+    g.traverse((c) => {
+      c.userData.bot = i;
+    });
+    return {
+      mesh: g,
+      hp: 100,
+      shield: 50,
+      cooldown: 2 + i * 0.2,
+      target: null,
+      thinkAt: i * 0.025,
+      seed: i * 0.7,
+      name: names[i] ?? 'Player',
+      tag,
+      armed: false,
+      dropping: false,
+      dying: 0,
+      deathY: 0,
+    };
+  }
+  syncRemotePlayers(remotes: RoomSnapshot['players']) {
+    const existing = new Map(this.bots.map((bot) => [bot.remoteId, bot]));
+    const retained = new Set<Bot>();
+    const next = remotes.map((player, i) => {
+      const bot = existing.get(player.id) ?? this.createBot(i, remotes.length);
+      if (bot.remoteId !== player.id) {
+        bot.remoteId = player.id;
+        bot.mesh.position.set(player.x, player.y - 1.7, player.z);
+        bot.remoteTarget = new THREE.Vector3();
+      }
+      if (bot.mesh.userData.bot !== i)
+        bot.mesh.traverse((object) => {
+          object.userData.bot = i;
+        });
+      retained.add(bot);
+      return bot;
+    });
+    for (const bot of this.bots) {
+      if (retained.has(bot)) continue;
+      bot.mesh.removeFromParent();
+      this.disposeObject(bot.mesh);
     }
+    this.bots = next;
   }
   bind() {
     const on = (target: EventTarget, type: string, fn: EventListener) => {
@@ -1694,14 +1720,13 @@ export class BattleGame {
         return;
       }
       if (this.state.phase !== 'playing' || this.menuOpen) return;
-      // Keep Command+W/R and other browser shortcuts from interrupting ADS.
-      if (this.keys.has('MetaRight')) e.preventDefault();
+      if (e.metaKey || e.altKey) return;
       if (
         [
           'Space',
           'ControlLeft',
           'ControlRight',
-          'MetaRight',
+          'KeyZ',
           'Tab',
           'ArrowUp',
           'ArrowDown',
@@ -1711,7 +1736,7 @@ export class BattleGame {
       )
         e.preventDefault();
       this.keys.add(e.code);
-      if (!e.repeat && e.code === 'MetaRight') this.setAiming(true);
+      if (!e.repeat && e.code === 'KeyZ') this.setAiming(true);
       if (e.code === 'KeyR') this.reload();
       if (!e.repeat && e.code === 'KeyV')
         this.setPerspective(this.perspective === 'third' ? 'first' : 'third');
@@ -1765,10 +1790,8 @@ export class BattleGame {
         return;
       }
       this.keys.delete(e.code);
-      if (e.code === 'MetaRight') {
+      if (e.code === 'KeyZ') {
         e.preventDefault();
-        // macOS can suppress other keyup events while Command is held.
-        this.keys.clear();
         this.setAiming(
           this.mouseAimHeld && !this.state.mapOpen && !this.menuOpen,
         );
@@ -1805,7 +1828,7 @@ export class BattleGame {
       }
       if (e.button === 2) {
         this.mouseAimHeld = false;
-        if (!this.touch) this.setAiming(this.keys.has('MetaRight'));
+        if (!this.touch) this.setAiming(this.keys.has('KeyZ'));
       }
     }) as EventListener);
     on(this.renderer.domElement, 'contextmenu', (e: Event) =>
@@ -3204,17 +3227,8 @@ export class BattleGame {
       return;
     }
     if (this.isGunGame()) {
-      const a = arenaStep(pos.x + dx, pos.z, feet);
-      if (a !== null) {
-        pos.x += dx;
-        pos.y = Math.max(pos.y, a + 1.7);
-        feet = a;
-      }
-      const b = arenaStep(pos.x, pos.z + dz, feet);
-      if (b !== null) {
-        pos.z += dz;
-        pos.y = Math.max(pos.y, b + 1.7);
-      }
+      const next = arenaMove({ x: pos.x, y: feet + 1.7, z: pos.z }, dx, dz);
+      pos.set(next.x, Math.max(pos.y, next.y), next.z);
       const length = Math.hypot(pos.x, pos.z);
       if (length > GUN_RADIUS) {
         pos.x *= GUN_RADIUS / length;
@@ -4125,6 +4139,9 @@ export class BattleGame {
   }
   pose(aim?: { yaw: number; pitch: number }): PlayerPose {
     return this.positionHistory.record({
+      spawnedAt: this.networkRoom?.players.find(
+        (p) => p.id === this.network?.playerId,
+      )?.spawnedAt,
       x: this.position.x,
       y: this.position.y,
       z: this.position.z,
@@ -4209,7 +4226,7 @@ export class BattleGame {
       this.zoneCue = '';
       this.cooldown = 0.3;
       this.setArena(isArenaMode(room.mode));
-      this.resetBots(remotes.length);
+      this.resetBots(0);
       this.spawnLoot();
       this.resetChests(`${room.code}:${room.round}`);
       if (isArenaMode(room.mode)) {
@@ -4261,18 +4278,20 @@ export class BattleGame {
             : 'Your teammate brought you back. Find a weapon!',
       );
     }
-    const replacedRemotes = this.bots.length !== remotes.length;
-    if (replacedRemotes) this.resetBots(remotes.length);
+    // Preserve each player's model and interpolation when people join/leave.
+    this.syncRemotePlayers(remotes);
+    const previousPlayers = new Map(
+      previousRoom?.players.map((p) => [p.id, p]),
+    );
     this.remoteTargets = remotes.map((p, i) => {
       const b = this.bots[i];
-      if (newRound || replacedRemotes) b.mesh.position.set(p.x, p.y - 1.7, p.z);
       setCharacterSkin(
         b.mesh,
         room.mode === 'team-deathmatch' ? 4 + (p.team ?? 0) : skinIndex(p.name),
       );
       const teammate = isTeamMode(room.mode) && me.team === p.team;
       const label = `${teammate ? '◆ ' : ''}${p.name}${p.downed ? ' · DOWN' : (p.protectedUntil ?? 0) > room.now ? ' · SAFE' : ''}`;
-      const previous = previousRoom?.players.find((q) => q.id === p.id);
+      const previous = previousPlayers.get(p.id);
       if (p.health > 0 && (newRound || p.spawnedAt !== previous?.spawnedAt)) {
         b.dying = 0;
         b.mesh.rotation.z = 0;
@@ -4332,7 +4351,7 @@ export class BattleGame {
       b.dropping = p.dropping;
       b.mesh.visible = !p.onBus && (p.health > 0 || b.dying > 0);
       b.mesh.rotation.y = p.yaw + Math.PI;
-      return new THREE.Vector3(p.x, p.y - 1.7, p.z);
+      return b.remoteTarget!.set(p.x, p.y - 1.7, p.z);
     });
     if (
       me.mantleUntil &&

@@ -7,6 +7,7 @@ import type { Point } from './movement.ts';
 import type { Zone } from './zones.ts';
 import type { RecoveryState, SupplyKind } from './rules.ts';
 export type PlayerPose = {
+  spawnedAt?: number;
   x: number;
   y: number;
   z: number;

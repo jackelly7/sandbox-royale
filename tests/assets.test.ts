@@ -156,3 +156,46 @@ void test('asset refresh preserves the authoritative collision and loot layout',
   );
   game.disposeObject(game.world);
 });
+
+void test('Gun Game preserves fifteen remote models when players join, leave, or reorder', () => {
+  const game = world();
+  game.networkRoom = { mode: 'gun-game' } as NonNullable<
+    BattleGame['networkRoom']
+  >;
+  const remotes = Array.from({ length: 15 }, (_, i) => ({
+    id: `p${i}`,
+    x: i,
+    y: 1.7,
+    z: 25,
+  })) as NonNullable<BattleGame['networkRoom']>['players'];
+  game.syncRemotePlayers(remotes);
+  const models = new Map(game.bots.map((b) => [b.remoteId, b.mesh]));
+  const survivor = game.bots[1];
+  survivor.mesh.position.z = 24.7;
+  let disposed = 0;
+  models.get('p0')!.traverse((o) => {
+    if (o instanceof THREE.Mesh)
+      o.geometry.addEventListener('dispose', () => disposed++);
+  });
+  const next = remotes.slice(1).reverse();
+  next.push({ ...remotes[0], id: 'late-join' });
+  game.syncRemotePlayers(next);
+  assert.ok(disposed > 0, 'The departing player releases GPU resources');
+  assert.equal(
+    survivor.mesh.position.z,
+    24.7,
+    'Joining must not snap existing interpolated positions',
+  );
+  game.bots.forEach((b, i) => {
+    assert.equal(b.remoteId, next[i].id);
+    if (models.has(b.remoteId!)) assert.equal(b.mesh, models.get(b.remoteId!));
+    b.mesh.traverse((o) =>
+      assert.equal(
+        o.userData.bot,
+        i,
+        'Hit detection keeps the correct player index',
+      ),
+    );
+  });
+  game.disposeObject(game.world);
+});

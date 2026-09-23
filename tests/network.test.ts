@@ -1,10 +1,18 @@
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { MultiplayerClient } from '../lib/game/network.ts';
 import type { PlayerPose } from '../lib/game/multiplayer.ts';
+import {
+  createMember,
+  createRoom,
+  addMember,
+  applyCommand,
+  advance,
+  snapshot,
+  forViewer,
+} from '../server/model.ts';
 
-void test('live client sends actions over a persistent socket and reconciles acknowledgments', (t) => {
-  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+function fakeSockets(t: TestContext) {
   const original = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
   const sockets: FakeSocket[] = [];
   class FakeSocket {
@@ -41,6 +49,12 @@ void test('live client sends actions over a persistent socket and reconciles ack
     if (original) Object.defineProperty(globalThis, 'WebSocket', original);
     else Reflect.deleteProperty(globalThis, 'WebSocket');
   });
+  return sockets;
+}
+
+void test('live client sends actions over a persistent socket and reconciles acknowledgments', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
+  const sockets = fakeSockets(t);
   t.mock.method(globalThis, 'fetch', () => {
     assert.fail('Gameplay must not make HTTP round trips');
   });
@@ -168,3 +182,162 @@ void test('an initial room connection stops retrying instead of hanging forever'
   assert.equal(statuses.at(-1), 'offline');
   assert.match(errors.at(-1)!, /Leave the room and try joining again/);
 });
+
+void test('congested sockets preserve pose/action order and replay only after reconnect', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'setInterval', 'Date'] });
+  const sockets = fakeSockets(t);
+  const client = new MultiplayerClient(
+    { code: 'ABC234', playerId: 'friend', token: 'test' },
+    () => {},
+    () => {},
+    (message) => assert.fail(message),
+  );
+  t.after(() => client.close(false));
+  const socket = sockets[0];
+  socket.open();
+  socket.receive({ type: 'ready' });
+  socket.bufferedAmount = 65000;
+  const pose = { x: 1, y: 1.7, z: 62, yaw: 0, pitch: 0, weapon: -1 };
+  client.send({ type: 'pose', pose });
+  client.send({ type: 'pickup', index: 19 });
+  client.send({ type: 'pose', pose: { ...pose, x: 2 } });
+  client.send({ type: 'pose', pose: { ...pose, x: 3 } });
+  socket.bufferedAmount = 0;
+  t.mock.timers.tick(50);
+  const packet = JSON.parse(socket.sent.at(-1)!);
+  assert.deepEqual(
+    packet.actions.map((a: { command: { type: string } }) => a.command.type),
+    ['pose', 'pickup', 'pose'],
+  );
+  assert.equal(packet.actions[0].command.pose.x, 1);
+  assert.equal(packet.actions[2].command.pose.x, 3);
+  const packets = () =>
+    socket.sent.map((s) => JSON.parse(s)).filter((m) => m.type === 'commands');
+  t.mock.timers.tick(500);
+  assert.equal(
+    packets().length,
+    1,
+    'No retransmission while a reliable socket awaits its ack',
+  );
+  socket.close();
+  t.mock.timers.tick(500);
+  const replacement = sockets[1];
+  replacement.open();
+  replacement.receive({ type: 'ready' });
+  assert.deepEqual(
+    JSON.parse(replacement.sent.at(-1)!).actions,
+    packet.actions,
+  );
+  replacement.receive({
+    type: 'snapshot',
+    ack: packet.actions.at(-1).seq,
+    room: {},
+  });
+  assert.equal(client.pending.length, 0);
+  socket.onclose?.();
+  assert.equal(
+    client.socketReady,
+    true,
+    'A stale socket cannot shut down its replacement',
+  );
+});
+
+for (const mode of ['gun-game'] as const) {
+  void test(`${mode}: eight clients and eight bots keep commands ordered with 250ms snapshot delay`, (t) => {
+    t.mock.timers.enable({
+      apis: ['setTimeout', 'setInterval', 'Date'],
+      now: 10000,
+    });
+    const sockets = fakeSockets(t);
+    const room = createRoom(
+      'ABC234',
+      createMember('p0', 'Player 0', 'hash', 1000),
+      1000,
+    );
+    for (let i = 1; i < 8; i++)
+      addMember(room, createMember(`p${i}`, `Player ${i}`, 'hash', 1000));
+    applyCommand(room, 'p0', { type: 'mode', mode }, 1000);
+    applyCommand(room, 'p0', { type: 'bots', count: 8 }, 1000);
+    applyCommand(room, 'p0', { type: 'start' }, 1000);
+    const updates = Array(8).fill(0) as number[];
+    const clients = Array.from(
+      { length: 8 },
+      (_, i) =>
+        new MultiplayerClient(
+          { code: room.code, playerId: `p${i}`, token: 'test' },
+          (next) => {
+            assert.equal(next.mode, mode);
+            assert.equal(next.players.length, 16);
+            updates[i]++;
+          },
+          () => {},
+          (message) => assert.fail(message),
+        ),
+    );
+    t.after(() => clients.forEach((client) => client.close(false)));
+    sockets.forEach((socket) => {
+      socket.open();
+      socket.receive({ type: 'ready' });
+    });
+    const sequences = clients.map(() => new Set<number>());
+    let total = 0;
+    for (let frame = 0; frame < 40; frame++) {
+      for (const [i, client] of clients.entries()) {
+        const p = room.players.find((p) => p.id === `p${i}`)!;
+        client.send({
+          type: 'pose',
+          pose: {
+            x: p.x,
+            y: p.y,
+            z: p.z,
+            yaw: frame / 100,
+            pitch: 0,
+            weapon: p.weapon,
+          },
+        });
+        if (frame % 5 === 0) client.send({ type: 'reload' });
+      }
+      t.mock.timers.tick(50);
+      const now = Date.now();
+      for (const [i, socket] of sockets.entries()) {
+        const p = room.players.find((p) => p.id === `p${i}`)!;
+        p.lastSeen = now;
+        for (const raw of socket.sent.splice(0)) {
+          const message = JSON.parse(raw);
+          if (message.type !== 'commands') continue;
+          for (const action of message.actions) {
+            assert.ok(
+              !sequences[i].has(action.seq),
+              'Congestion must not duplicate actions',
+            );
+            sequences[i].add(action.seq);
+            applyCommand(room, p.id, action.command, now);
+            p.lastCommand = action.seq;
+            total++;
+          }
+        }
+      }
+      advance(room, now);
+      for (const [i, socket] of sockets.entries()) {
+        const p = room.players.find((p) => p.id === `p${i}`)!;
+        const message = structuredClone({
+          type: 'snapshot',
+          ack: p.lastCommand,
+          room: forViewer(snapshot(room, now), p.id),
+        });
+        setTimeout(() => socket.receive(message), 250);
+      }
+    }
+    t.mock.timers.tick(300);
+    assert.ok(updates.every((count) => count >= 40));
+    assert.ok(clients.every((client) => client.pending.length === 0));
+    assert.ok(
+      room.players
+        .filter((p) => !p.bot && p.health > 0)
+        .every((p) => p.yaw === 0.39),
+    );
+    console.log(
+      `${mode}: ${total} actions, zero duplicate sends, 8 clients / 16 participants`,
+    );
+  });
+}
