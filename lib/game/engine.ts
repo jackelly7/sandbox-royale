@@ -1,3 +1,4 @@
+import { PositionHistory } from './position-history.ts';
 import { ActionParticles } from './action-particles.ts';
 import { isArenaMode, isTeamMode } from './modes.ts';
 import { DEFAULT_PREFERENCES, type Preferences } from './preferences.ts';
@@ -668,6 +669,7 @@ export class BattleGame {
   liftRemaining = 0;
   launchAt = -100;
   correction = new THREE.Vector3();
+  positionHistory = new PositionHistory();
   renderStats = { before: 0, after: 0 };
   framesRendered = 0;
   measuredAt = 0;
@@ -684,6 +686,7 @@ export class BattleGame {
   viewKick = 0;
   shooting = false;
   aiming = false;
+  mouseAimHeld = false;
   cooldown = 0;
   reloadTimer = 0;
   sensitivity = 1;
@@ -1691,11 +1694,14 @@ export class BattleGame {
         return;
       }
       if (this.state.phase !== 'playing' || this.menuOpen) return;
+      // Keep Command+W/R and other browser shortcuts from interrupting ADS.
+      if (this.keys.has('MetaRight')) e.preventDefault();
       if (
         [
           'Space',
           'ControlLeft',
           'ControlRight',
+          'MetaRight',
           'Tab',
           'ArrowUp',
           'ArrowDown',
@@ -1705,6 +1711,7 @@ export class BattleGame {
       )
         e.preventDefault();
       this.keys.add(e.code);
+      if (!e.repeat && e.code === 'MetaRight') this.setAiming(true);
       if (e.code === 'KeyR') this.reload();
       if (!e.repeat && e.code === 'KeyV')
         this.setPerspective(this.perspective === 'third' ? 'first' : 'third');
@@ -1758,6 +1765,14 @@ export class BattleGame {
         return;
       }
       this.keys.delete(e.code);
+      if (e.code === 'MetaRight') {
+        e.preventDefault();
+        // macOS can suppress other keyup events while Command is held.
+        this.keys.clear();
+        this.setAiming(
+          this.mouseAimHeld && !this.state.mapOpen && !this.menuOpen,
+        );
+      }
     }) as EventListener);
     on(document, 'mousemove', ((e: MouseEvent) => {
       if (
@@ -1773,7 +1788,10 @@ export class BattleGame {
           this.triggerHeld = false;
           this.shooting = true;
         }
-        if (e.button === 2) this.setAiming(true);
+        if (e.button === 2) {
+          this.mouseAimHeld = true;
+          this.setAiming(true);
+        }
         if (e.button === 1) {
           e.preventDefault();
           this.mark();
@@ -1785,7 +1803,10 @@ export class BattleGame {
         this.shooting = false;
         this.triggerHeld = false;
       }
-      if (e.button === 2 && !this.touch) this.setAiming(false);
+      if (e.button === 2) {
+        this.mouseAimHeld = false;
+        if (!this.touch) this.setAiming(this.keys.has('MetaRight'));
+      }
     }) as EventListener);
     on(this.renderer.domElement, 'contextmenu', (e: Event) =>
       e.preventDefault(),
@@ -2188,6 +2209,7 @@ export class BattleGame {
     this.triggerHeld = false;
     this.setAiming(false);
     this.keys.clear();
+    this.mouseAimHeld = false;
     this.touchMove = { x: 0, y: 0 };
     this.emit();
   }
@@ -2312,6 +2334,7 @@ export class BattleGame {
     this.state.phase = 'paused';
     this.state.mapOpen = false;
     this.keys.clear();
+    this.mouseAimHeld = false;
     this.shooting = false;
     this.aiming = false;
     this.touchMove = { x: 0, y: 0 };
@@ -2331,6 +2354,7 @@ export class BattleGame {
     this.state.spectator = null;
     this.spectatorId = null;
     this.keys.clear();
+    this.mouseAimHeld = false;
     this.shooting = false;
     this.aiming = false;
     this.gun.visible = false;
@@ -2720,7 +2744,7 @@ export class BattleGame {
     if (this.network)
       this.network.send({
         type: 'shoot',
-        pose: { ...this.pose(), yaw: aim.yaw, pitch: aim.pitch },
+        pose: this.pose(aim),
         aiming: this.aiming,
       });
     this.viewKick = Math.min(0.06, (this.viewKick || 0) + FEEL[i].view);
@@ -3085,6 +3109,7 @@ export class BattleGame {
     this.state.healRemaining = 0;
     this.shooting = false;
     this.keys.clear();
+    this.mouseAimHeld = false;
     this.aiming = false;
     if (
       (!this.isGunGame() || won || this.networkRoom?.phase === 'finished') &&
@@ -3739,6 +3764,7 @@ export class BattleGame {
           .clone()
           .multiplyScalar(1 - Math.exp(-dt * 12));
         this.position.add(step);
+        this.positionHistory.applied(step.x, step.z);
         this.correction.sub(step);
       }
       this.crouchOffset +=
@@ -4097,20 +4123,21 @@ export class BattleGame {
       .map((b) => ({ x: b.mesh.position.x, z: b.mesh.position.z }));
     this.onState({ ...this.state });
   }
-  pose(): PlayerPose {
-    return {
+  pose(aim?: { yaw: number; pitch: number }): PlayerPose {
+    return this.positionHistory.record({
       x: this.position.x,
       y: this.position.y,
       z: this.position.z,
-      yaw: this.yaw,
-      pitch: this.pitch,
+      yaw: aim?.yaw ?? this.yaw,
+      pitch: aim?.pitch ?? this.pitch,
       weapon: this.state.weapon,
       crouching: this.state.crouching,
       sprinting: this.state.sprinting,
-    };
+    });
   }
   attachNetwork(playerId: string, send: (command: Command) => void) {
     this.network = { playerId, send };
+    this.positionHistory = new PositionHistory();
     this.networkRound = 0;
     this.networkRoom = null;
     this.networkEvents.clear();
@@ -4143,6 +4170,7 @@ export class BattleGame {
     const remotes = room.players.filter((p) => p.id !== me.id);
     const newRound = room.round !== this.networkRound;
     if (newRound) {
+      this.positionHistory = new PositionHistory();
       this.networkRound = room.round;
       this.networkEvents.clear();
       this.footsteps.clear();
@@ -4202,6 +4230,7 @@ export class BattleGame {
       me.health > 0 &&
       me.spawnedAt !== oldMe?.spawnedAt;
     if (respawned) {
+      this.positionHistory.reset();
       this.position.set(me.x, me.y, me.z);
       this.correction.set(0, 0, 0);
       this.motion.set(0, 0);
@@ -4311,6 +4340,7 @@ export class BattleGame {
       me.mantleFrom &&
       me.mantleTo
     ) {
+      this.positionHistory.reset();
       this.mantle = {
         from: me.mantleFrom,
         to: me.mantleTo,
@@ -4331,14 +4361,15 @@ export class BattleGame {
       !me.onBus &&
       !previousRoom?.players.find((p) => p.id === me.id)?.onBus
     ) {
-      const correctionX = me.x - acknowledgedPose.x,
-        correctionZ = me.z - acknowledgedPose.z;
-      if (Math.hypot(correctionX, correctionZ) > 0.05) {
-        if (Math.hypot(correctionX, correctionZ) > 4) {
-          this.position.x += correctionX;
-          this.position.z += correctionZ;
-          this.correction.set(0, 0, 0);
-        } else this.correction.set(correctionX, 0, correctionZ);
+      const error = this.positionHistory.error(me, acknowledgedPose);
+      if (error) {
+        this.correction.set(0, 0, 0);
+        const distance = Math.hypot(error.x, error.z);
+        if (distance > 4) {
+          this.position.x += error.x;
+          this.position.z += error.z;
+          this.positionHistory.applied(error.x, error.z);
+        } else if (distance > 0.05) this.correction.set(error.x, 0, error.z);
       }
     }
     if (
@@ -4354,6 +4385,7 @@ export class BattleGame {
         previousRoom?.players.find((p) => p.id === me.id)?.launchAt &&
         me.dropping)
     ) {
+      this.positionHistory.reset();
       this.position.set(me.x, me.y, me.z);
       this.correction.set(0, 0, 0);
       this.motion.set(0, 0);
@@ -4381,6 +4413,7 @@ export class BattleGame {
     if (me.dropping && !me.onBus)
       this.position.y = THREE.MathUtils.lerp(this.position.y, me.y, 0.5);
     if (this.state.dropping && !me.dropping && me.health > 0) {
+      this.positionHistory.reset();
       this.position.set(me.x, me.y, me.z);
       this.velocityY = 0;
       this.correction.set(0, 0, 0);
@@ -4639,6 +4672,7 @@ export class BattleGame {
       this.state.phase = 'lost';
       this.shooting = false;
       this.keys.clear();
+      this.mouseAimHeld = false;
       if (document.pointerLockElement) document.exitPointerLock();
     }
     if (me.spectator && this.state.phase === 'paused') {

@@ -19,7 +19,7 @@ npm install
 npm run dev
 ```
 
-Open the URL printed by the server. WebGL 2 is required. WASD moves, mouse aims, left click fires, right click zooms, Shift sprints, Space jumps, R reloads, E collects supplies, Q uses a medkit, F uses a shield cell, X cancels healing, and 1–3 or the scroll wheel switches collected weapons. Escape opens the menu. Touch controls are available in Settings.
+Open the URL printed by the server. WebGL 2 is required. WASD moves, mouse aims, left click fires, right click or right Command zooms, Shift sprints, Space jumps, R reloads, E collects supplies, Q uses a medkit, F uses a shield cell, X cancels healing, and 1–3 or the scroll wheel switches collected weapons. Escape opens the menu. Touch controls are available in Settings.
 
 Room creation and joins use the same-origin `/api/multiplayer` endpoint. Live gameplay connects directly to the Neon WebSocket endpoint in `lib/game/network-config.ts`. Set `MULTIPLAYER_DATABASE_URL` in an ignored `.dev.vars` file for local development and in Sites secrets for deployment. Apply `server/schema.sql` to the dedicated multiplayer database. Its identifiers are in `server/deployment.json`.
 
@@ -86,7 +86,7 @@ The interface uses the supplied Sandbox logo, the black and white palette from h
 
 ## Aim and combat balance
 
-Right-click to aim, or toggle the aim button on touch screens. The sniper's physical model hides while scoped so its transparent 3× reticle has a clear sightline. AR and shotgun aim views keep the model below the center dot. Damage is 14 per AR bullet, 10.8 per shotgun pellet, and 50 per sniper round. Headshots multiply damage by 1.5. A fresh player with 100 health and 50 shields survives any single weapon blast, including a full shotgun headshot.
+Hold right-click or the right Command key to aim, or toggle the aim button on touch screens. The sniper's physical model hides while scoped so its transparent 3× reticle has a clear sightline. AR and shotgun aim views keep the model below the center dot. Damage is 14 per AR bullet, 10.8 per shotgun pellet, and 50 per sniper round. Headshots multiply damage by 1.5. A fresh player with 100 health and 50 shields survives any single weapon blast, including a full shotgun headshot.
 
 
 ### Active games, duos, and the sandbox

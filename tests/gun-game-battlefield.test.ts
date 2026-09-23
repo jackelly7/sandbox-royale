@@ -453,6 +453,15 @@ void test('client death, spectator camera, respawn and new loadout remain in the
     assert.equal(g.state.phase, 'paused');
     assert.equal(g.chestRenderer, undefined);
     g.state.phase = 'playing';
+    // Several poses were sent before the server rejected a position 20m away.
+    // Each delayed acknowledgment must not teleport the player another 20m.
+    g.position.x += 20;
+    const delayed = Array.from({ length: 5 }, () => g.pose());
+    for (const pose of delayed) {
+      g.applyNetworkSnapshot(structuredClone(snapshot(r, 8000)), pose);
+      assert.equal(g.position.x, r.players[0].x);
+      assert.equal(g.position.z, r.players[0].z);
+    }
     damageMember(r, r.players[0], 999, 8000, r.players[1]);
     g.applyNetworkSnapshot(structuredClone(snapshot(r, 8000)));
     assert.equal(g.state.phase, 'dying');
@@ -481,6 +490,12 @@ void test('client death, spectator camera, respawn and new loadout remain in the
     assert.equal(g.state.spectator, null);
     assert.equal(g.camera.rotation.z, 0);
     assert.equal(g.networkRound, 1);
+    g.applyNetworkSnapshot(structuredClone(snapshot(r, 11000)), delayed[0]);
+    assert.equal(
+      g.position.x,
+      r.players[0].x,
+      'Pre-respawn poses stay invalid',
+    );
     tick(r, 13000);
     damageMember(r, r.players[1], 999, 13000, r.players[0]);
     g.applyNetworkSnapshot(structuredClone(snapshot(r, 13000)));

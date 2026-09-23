@@ -1,3 +1,4 @@
+import { PositionHistory } from '../lib/game/position-history.ts';
 import { ARENA_SCALE, ARENA_RADIUS } from '../lib/game/arena.ts';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -38,6 +39,7 @@ function arena() {
     flash: new THREE.Mesh(),
     onState: () => {},
     position: new THREE.Vector3(0, 1.7, 50),
+    positionHistory: new PositionHistory(),
     state: {
       ammo: 5,
       reserve: 20,
