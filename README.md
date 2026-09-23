@@ -86,7 +86,7 @@ The interface uses the supplied Sandbox logo, the black and white palette from h
 
 ## Aim and combat balance
 
-Hold right-click or Z to aim, or toggle the aim button on touch screens. The sniper's physical model hides while scoped so its transparent 3× reticle has a clear sightline. AR and shotgun aim views keep the model below the center dot. Damage is 14 per AR bullet, 10.8 per shotgun pellet, and 50 per sniper round. Headshots multiply damage by 1.5. A fresh player with 100 health and 50 shields survives any single weapon blast, including a full shotgun headshot.
+Hold right-click or Z to aim, or toggle the aim button on touch screens. The sniper's physical model hides while scoped so its transparent 3× reticle has a clear sightline. AR and shotgun aim views keep the model below the center dot. Damage is 14 per AR bullet, 10.8 per shotgun pellet, and 90 per base sniper round. Headshots multiply damage by 1.5, or 2 for Epic and Legendary snipers, which eliminate a player with full health and shields. Gun Game boosts pistol, marksman, and revolver damage and accuracy, and lets players hold fire on every weapon at its normal firing cadence.
 
 
 ### Active games, duos, and the sandbox

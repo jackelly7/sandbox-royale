@@ -100,15 +100,21 @@ export class MultiplayerClient {
       socket.send(JSON.stringify({ type: 'auth', ...this.session }));
     socket.onmessage = (event) => {
       if (this.closed || this.socket !== socket) return;
-      this.lastServer = Date.now();
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'ready') {
           this.socketReady = true;
           this.flush();
         }
-        if (message.type === 'error') this.onError(message.message);
+        if (message.type === 'error') {
+          this.onError(message.message);
+          if (message.retryable === false) {
+            this.close(false);
+            return;
+          }
+        }
         if (message.type === 'snapshot') {
+          this.lastServer = Date.now();
           this.retry = 0;
           this.receivedRoom = true;
           const acknowledged = [...this.sentPoses.entries()]
@@ -145,6 +151,7 @@ export class MultiplayerClient {
       );
     };
     this.beat = setInterval(() => {
+      // Pongs prove the socket is alive, not that the match is advancing.
       if (Date.now() - this.lastServer > 8000) {
         socket.close();
         return;

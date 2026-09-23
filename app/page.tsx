@@ -539,7 +539,14 @@ export default function Home() {
             setPanel(null);
           roomPhase.current = next.phase;
         },
-        setConnection,
+        (status) => {
+          setConnection(status);
+          if (status === 'connected') setRoomError('');
+          if (status === 'offline') {
+            game.current?.pause();
+            setPanel('friends');
+          }
+        },
         setRoomError,
       );
       game.current.attachNetwork(joined.playerId, (command) =>

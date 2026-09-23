@@ -1,3 +1,4 @@
+import type { GameMode } from './modes.ts';
 import { zoneAt } from './zones.ts';
 export const RARITIES = [
   { name: 'Common', color: '#c9d0d5', power: 1 },
@@ -36,7 +37,7 @@ export const WEAPONS = [
     name: 'Longshot Sniper',
     short: 'SNIPER',
     capacity: 5,
-    damage: 50,
+    damage: 90,
     interval: 1.2,
     reload: 2.3,
     spread: 0.1,
@@ -111,7 +112,8 @@ export const WEAPONS = [
     color: '#ffa0b7',
   },
 ];
-export const automaticWeapon = (index: number) => [0, 4, 5].includes(index);
+export const automaticWeapon = (index: number, mode?: GameMode) =>
+  mode === 'gun-game' || [0, 4, 5].includes(index);
 export function cycleWeapon(
   current: number,
   owned: boolean[],
@@ -207,6 +209,9 @@ export const DROP_HEIGHT = 42;
 export const DROP_SPEED = 6;
 
 export const HEADSHOT_MULTIPLIER = 1.5;
+export function headshotMultiplier(weapon: number, rarity = 0) {
+  return weapon === 2 && rarity >= 2 ? 2 : HEADSHOT_MULTIPLIER;
+}
 
 // Angular spread is identical in solo and on the authoritative multiplayer server.
 export function shotDirection(
@@ -215,9 +220,12 @@ export function shotDirection(
   weapon: number,
   aiming: boolean,
   pellet = 0,
+  mode?: GameMode,
 ): [number, number, number] {
   const w = WEAPONS[weapon];
-  const spread = aiming ? w.aimedSpread : w.spread;
+  const spread =
+    (aiming ? w.aimedSpread : w.spread) *
+    (mode === 'gun-game' && [3, 6, 7].includes(weapon) ? 0.6 : 1);
   const angle =
     w.pellets > 1 ? ((pellet - 1) * Math.PI) / 3 : Math.random() * Math.PI * 2;
   const radius =
@@ -230,7 +238,12 @@ export function shotDirection(
   const p = pitch + Math.sin(angle) * radius;
   return [-Math.sin(y) * Math.cos(p), Math.sin(p), -Math.cos(y) * Math.cos(p)];
 }
-export function weaponDamage(weapon: number, distance: number, rarity = 0) {
+export function weaponDamage(
+  weapon: number,
+  distance: number,
+  rarity = 0,
+  mode?: GameMode,
+) {
   const w = WEAPONS[weapon];
   if (distance >= w.range) return 0;
   const falloff =
@@ -243,5 +256,9 @@ export function weaponDamage(weapon: number, distance: number, rarity = 0) {
           : weapon === 3 || weapon === 7
             ? Math.max(0.45, 1 - Math.max(0, distance - 25) / 60)
             : 1;
-  return w.damage * falloff * (RARITIES[rarity]?.power ?? 1);
+  const damage =
+    mode === 'gun-game'
+      ? ({ 3: 34, 6: 46, 7: 60 }[weapon] ?? w.damage)
+      : w.damage;
+  return damage * falloff * (RARITIES[rarity]?.power ?? 1);
 }

@@ -78,7 +78,7 @@ import { randomUUID } from 'node:crypto';
 import { MAP } from '../lib/game/map-data.ts';
 import {
   WEAPONS,
-  HEADSHOT_MULTIPLIER,
+  headshotMultiplier,
   shotDirection,
   weaponDamage,
   takeDamage,
@@ -1111,7 +1111,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
   >();
   for (let n = 0; n < w.pellets; n++) {
     if (room.phase === 'finished') break;
-    const dir = shotDirection(p.yaw, p.pitch, shotWeapon, aiming, n);
+    const dir = shotDirection(p.yaw, p.pitch, shotWeapon, aiming, n, room.mode);
     let nearest = w.range,
       target: Member | undefined;
     for (const box of roomBounds(room)) {
@@ -1156,8 +1156,15 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
         oldShield = target.shield;
       const amount = Math.min(
         oldHealth + oldShield,
-        weaponDamage(shotWeapon, nearest, p.tiers?.[shotWeapon] ?? 0) *
-          (headshot ? HEADSHOT_MULTIPLIER : 1),
+        weaponDamage(
+          shotWeapon,
+          nearest,
+          p.tiers?.[shotWeapon] ?? 0,
+          room.mode,
+        ) *
+          (headshot
+            ? headshotMultiplier(shotWeapon, p.tiers?.[shotWeapon] ?? 0)
+            : 1),
       );
       damageMember(room, target, amount, now, p);
       const hit = hits.get(target.id) ?? {

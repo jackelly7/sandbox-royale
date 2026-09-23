@@ -341,3 +341,55 @@ for (const mode of ['gun-game'] as const) {
     );
   });
 }
+
+void test('pongs cannot hide a stalled mid-round match', (t) => {
+  t.mock.timers.enable({
+    apis: ['Date', 'setTimeout', 'setInterval'],
+    now: 10000,
+  });
+  const sockets = fakeSockets(t);
+  const statuses: string[] = [];
+  const client = new MultiplayerClient(
+    { code: 'ABC234', playerId: 'p', token: 'test' },
+    () => {},
+    (s) => statuses.push(s),
+    () => {},
+  );
+  t.after(() => client.close(false));
+  const socket = sockets[0];
+  socket.open();
+  socket.receive({ type: 'ready' });
+  socket.receive({ type: 'snapshot', ack: 0, room: { phase: 'playing' } });
+  for (let i = 0; i < 9; i++) {
+    socket.receive({ type: 'pong', at: Date.now() });
+    t.mock.timers.tick(1000);
+  }
+  assert.ok(statuses.includes('reconnecting'));
+  assert.equal(socket.readyState, 3);
+  t.mock.timers.tick(500);
+  assert.ok(sockets.length > 1);
+});
+
+void test('capacity errors stop reconnect loops and leave the match offline', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'] });
+  const sockets = fakeSockets(t),
+    statuses: string[] = [],
+    errors: string[] = [];
+  const client = new MultiplayerClient(
+    { code: 'ABC234', playerId: 'p', token: 'test' },
+    () => {},
+    (s) => statuses.push(s),
+    (e) => errors.push(e),
+  );
+  sockets[0].open();
+  sockets[0].receive({
+    type: 'error',
+    retryable: false,
+    message: 'Server capacity reached.',
+  });
+  t.mock.timers.tick(10000);
+  assert.equal(client.closed, true);
+  assert.equal(statuses.at(-1), 'offline');
+  assert.deepEqual(errors, ['Server capacity reached.']);
+  assert.equal(sockets.length, 1);
+});

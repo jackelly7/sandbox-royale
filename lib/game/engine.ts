@@ -1,3 +1,4 @@
+import { playerBodyVisible } from './player-card.ts';
 import { PositionHistory } from './position-history.ts';
 import { ActionParticles } from './action-particles.ts';
 import { isArenaMode, isTeamMode } from './modes.ts';
@@ -102,7 +103,7 @@ import {
   automaticWeapon,
   BOT_COUNT,
   WEAPONS,
-  HEADSHOT_MULTIPLIER,
+  headshotMultiplier,
   RARITIES,
   shotDirection,
   weaponDamage,
@@ -2730,7 +2731,7 @@ export class BattleGame {
       this.reload();
       return;
     }
-    if (!automaticWeapon(i) && this.triggerHeld) return;
+    if (!automaticWeapon(i, this.networkRoom?.mode) && this.triggerHeld) return;
     this.triggerHeld = true;
     if (this.practice) this.state.practiceHit = undefined;
     this.weaponAmmo[i]--;
@@ -2781,6 +2782,7 @@ export class BattleGame {
             this.state.weapon,
             this.aiming,
             p,
+            this.networkRoom?.mode,
           ),
         ),
       );
@@ -2800,7 +2802,7 @@ export class BattleGame {
         const headshot = first.point.y > 2;
         const damage =
           weaponDamage(i, first.distance) *
-          (headshot ? HEADSHOT_MULTIPLIER : 1);
+          (headshot ? headshotMultiplier(i, this.state.tiers?.[i] ?? 0) : 1);
         const previous = this.state.practiceHit;
         this.state.practiceHit = {
           damage: (p > 0 ? (previous?.damage ?? 0) : 0) + damage,
@@ -2831,7 +2833,10 @@ export class BattleGame {
               this.state.weapon,
               first.distance,
               this.state.tiers?.[this.state.weapon] ?? 0,
-            ) * (headshot ? HEADSHOT_MULTIPLIER : 1),
+            ) *
+              (headshot
+                ? headshotMultiplier(i, this.state.tiers?.[i] ?? 0)
+                : 1),
           );
           b.hp = result.health;
           b.shield = result.shield;
@@ -4023,17 +4028,13 @@ export class BattleGame {
         b.tag.visible =
           this.state.phase !== 'lobby' &&
           b.hp > 0 &&
-          !smokeBlocks(
-            this.camera.position,
-            {
-              x: b.mesh.position.x,
-              y: b.mesh.position.y + 1.5,
-              z: b.mesh.position.z,
-            },
+          playerBodyVisible(
+            this.camera,
+            b.mesh,
+            this.physicsBounds(),
             this.activeSmokes(),
             this.state.elapsed * 1000,
-          ) &&
-          b.mesh.position.distanceToSquared(this.camera.position) < 85 * 85;
+          );
     }
     this.updateBattlefield();
     this.renderer.render(this.scene, this.camera);
