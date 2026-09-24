@@ -81,5 +81,7 @@ jobs:
           trap 'rm -f "$secret_file"' EXIT
           node --input-type=module -e 'import { writeFileSync } from "node:fs"; writeFileSync(process.argv[1], JSON.stringify({ MULTIPLAYER_DATABASE_URL: process.env.MULTIPLAYER_DATABASE_URL }), { mode: 0o600 })' "$secret_file"
           npx wrangler deploy --config dist/server/wrangler.json --secrets-file "$secret_file"
+      - name: Wait for website HTTPS to become ready
+        run: curl --fail --silent --show-error --retry 12 --retry-delay 10 --retry-all-errors --max-time 10 "$SITE_TEST_URL/" --output /dev/null
       - name: Verify website and multiplayer together
         run: node scripts/test-site-join.mjs
