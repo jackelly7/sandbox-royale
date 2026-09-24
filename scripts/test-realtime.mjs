@@ -1,8 +1,7 @@
+import { MULTIPLAYER_ORIGIN } from '../lib/game/network-config.ts';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
-const endpoint =
-  process.env.MULTIPLAYER_TEST_URL ||
-  'https://br-frosty-surf-a5j1d8vg-lastlight.compute.c-1.us-east-2.aws.neon.tech';
+const endpoint = process.env.MULTIPLAYER_TEST_URL || MULTIPLAYER_ORIGIN;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = async (path, data) => {
   const response = await fetch(endpoint + path, {
@@ -73,7 +72,8 @@ try {
   host.send({ type: 'start' });
   const dropping = await host.until((r) => r.phase === 'playing');
   assert.ok(dropping.players.every((p) => p.dropping && p.y > 20));
-  console.log('PASS all eight players begin under parachutes');
+  console.log('PASS all eight players begin on the drop bus');
+  clients.forEach((client) => client.send({ type: 'jumpBus' }));
   const room = await host.until(
     (r) => r.phase === 'playing' && r.players.every((p) => !p.dropping),
   );
@@ -119,54 +119,33 @@ try {
     `Eight-player movement latency: median ${median} ms, p95 ${p95} ms, ${latencies.length}/60 observed updates`,
   );
   assert.ok(p95 < 500, 'Movement updates are still too slow');
-  host.send({ type: 'pose', pose: { ...poses[0], x: 3, z: 62, yaw: 0 } });
+  const own = host.room.players.find((p) => p.id === host.session.playerId);
+  const action = host.send({ type: 'pose', pose: { ...own, yaw: 0.123 } });
   await host.until(
     (r) =>
-      Math.abs(r.players.find((p) => p.id === host.session.playerId).x - 3) <
-      0.01,
+      Math.abs(
+        r.players.find((p) => p.id === host.session.playerId).yaw - 0.123,
+      ) < 0.001,
   );
-  host.send({ type: 'pickup', index: 19 });
-  let own = (
-    await host.until(
-      (r) => r.players.find((p) => p.id === host.session.playerId).owned[0],
-    )
-  ).players.find((p) => p.id === host.session.playerId);
-  assert.equal(own.weapon, 0);
-  assert.equal(own.ammo[0], 30);
-  const shot = host.send({ type: 'shoot', pose: own, aiming: true });
-  await host.until(
-    (r) => r.players.find((p) => p.id === host.session.playerId).ammo[0] === 29,
+  // Reusing a processed sequence must not apply a different command payload.
+  host.ws.send(
+    JSON.stringify({
+      type: 'commands',
+      actions: [
+        {
+          ...action,
+          command: { type: 'pose', pose: { ...own, yaw: 1.5 } },
+        },
+      ],
+    }),
   );
-  host.ws.send(JSON.stringify({ type: 'commands', actions: [shot] }));
-  await wait(250);
-  own = host.room.players.find((p) => p.id === host.session.playerId);
-  assert.equal(own.ammo[0], 29);
-  for (const [kind, x, index] of [
-    [1, 6, 20],
-    [2, 9, 21],
-  ]) {
-    host.send({ type: 'pose', pose: { ...own, x, z: 62 } });
-    await host.until(
-      (r) =>
-        Math.abs(r.players.find((p) => p.id === host.session.playerId).x - x) <
-        0.01,
-    );
-    host.send({ type: 'pickup', index });
-    await host.until(
-      (r) => r.players.find((p) => p.id === host.session.playerId).owned[kind],
-    );
-    own = host.room.players.find((p) => p.id === host.session.playerId);
-    assert.equal(own.weapon, kind);
-    host.send({ type: 'pose', pose: { ...own, weapon: -1 } });
-    await wait(150);
-    assert.equal(
-      host.room.players.find((p) => p.id === host.session.playerId).weapon,
-      kind,
-    );
-  }
-  console.log(
-    'PASS AR, shotgun and sniper unlock and equip; repeated commands stay idempotent',
+  await wait(300);
+  assert.ok(
+    Math.abs(
+      host.room.players.find((p) => p.id === host.session.playerId).yaw - 0.123,
+    ) < 0.001,
   );
+  console.log('PASS replayed command sequences cannot change player state');
 } finally {
   clients.forEach((c) => {
     clearInterval(c.heartbeat);

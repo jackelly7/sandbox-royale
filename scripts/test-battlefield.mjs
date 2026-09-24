@@ -1,10 +1,9 @@
+import { MULTIPLAYER_ORIGIN } from '../lib/game/network-config.ts';
 import assert from 'node:assert/strict';
 import WebSocket from 'ws';
 import { MAP } from '../lib/game/map-data.ts';
 import { botPath } from '../server/bots.ts';
-const endpoint =
-  process.env.MULTIPLAYER_TEST_URL ||
-  'https://br-frosty-surf-a5j1d8vg-lastlight.compute.c-1.us-east-2.aws.neon.tech';
+const endpoint = process.env.MULTIPLAYER_TEST_URL || MULTIPLAYER_ORIGIN;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = async (path, data) => {
   const response = await fetch(endpoint + path, {

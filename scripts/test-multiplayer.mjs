@@ -40,6 +40,11 @@ async function connect(session, endpoint = url) {
       setTimeout(() => reject(new Error('WebSocket auth timeout')), 15000),
     ),
   ]);
+  const heartbeat = setInterval(() => {
+    if (socket.readyState === WebSocket.OPEN)
+      socket.send(JSON.stringify({ type: 'ping', at: Date.now() }));
+  }, 5000);
+  socket.on('close', () => clearInterval(heartbeat));
   return {
     socket,
     messages,
@@ -86,8 +91,14 @@ try {
   ]);
   assert.equal(as.room.startAt, bs.room.startAt);
   console.log('PASS shared countdown across sockets');
+  await a.wait((m) => m.type === 'snapshot' && m.room.phase === 'playing');
+  a.send({ type: 'jumpBus' });
+  b.send({ type: 'jumpBus' });
   const playing = await a.wait(
-    (m) => m.type === 'snapshot' && m.room.phase === 'playing',
+    (m) =>
+      m.type === 'snapshot' &&
+      m.room.phase === 'playing' &&
+      m.room.players.every((player) => !player.dropping),
   );
   const p = playing.room.players.find((p) => p.id === aSession.playerId);
   a.send({ type: 'pose', pose: { ...p, z: p.z - 0.4 } });
