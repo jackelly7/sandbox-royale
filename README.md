@@ -12,6 +12,10 @@ A browser-based first-person battle royale built with Three.js, React, and Vinex
 
 The game website must be shared with friends before they can open it. Room codes control which match they join. Opening the in-game menu does not pause an online match. A dropped connection automatically retries; players have 20 seconds to reconnect before elimination. Rooms expire after two hours. Refreshing the page leaves the current session; reconnect is intended for interruptions within the open page.
 
+## Deployment
+
+Merges to `main` run checks and deploy the website to Cloudflare Workers and the multiplayer server to Neon. Complete the account and GitHub secret setup in [the deployment guide](docs/deployment.md) to activate this workflow. The guide covers free-tier limits and recovery.
+
 ## Run locally
 
 ```sh
@@ -21,7 +25,7 @@ npm run dev
 
 Open the URL printed by the server. WebGL 2 is required. WASD moves, mouse aims, left click fires, right click or right Command zooms, Shift sprints, Space jumps, R reloads, E collects supplies, Q uses a medkit, F uses a shield cell, X cancels healing, and 1–3 or the scroll wheel switches collected weapons. Escape opens the menu. Touch controls are available in Settings.
 
-Room creation and joins use the same-origin `/api/multiplayer` endpoint. Live gameplay connects directly to the Neon WebSocket endpoint in `lib/game/network-config.ts`. Set `MULTIPLAYER_DATABASE_URL` in an ignored `.dev.vars` file for local development and in Sites secrets for deployment. Apply `server/schema.sql` to the dedicated multiplayer database. Its identifiers are in `server/deployment.json`.
+Room creation and joins use the same-origin `/api/multiplayer` endpoint. Live gameplay connects directly to the Neon WebSocket endpoint in `lib/game/network-config.ts`. Set `MULTIPLAYER_DATABASE_URL` in an ignored `.dev.vars` file for local development and as the Cloudflare runtime secret for deployment. Apply `server/schema.sql` to the dedicated multiplayer database. Its identifiers are in `server/deployment.json`.
 
 ## Multiplayer architecture
 

@@ -6,7 +6,9 @@ const endpoint =
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const clients = [];
 async function connect(session) {
-  const ws = new WebSocket(endpoint.replace(/^http/, 'ws') + '/ws');
+  const ws = new WebSocket(endpoint.replace(/^http/, 'ws') + '/ws', {
+    origin: process.env.SITE_TEST_URL || 'http://localhost:3000',
+  });
   const client = { session, ws, seq: 0, room: null, received: 0, onRoom: null };
   client.send = (command) => {
     const action = { seq: ++client.seq, command };

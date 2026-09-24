@@ -18,7 +18,8 @@
     "map:export": "node --experimental-strip-types scripts/export-map.ts",
     "test:websocket": "node scripts/test-multiplayer.mjs",
     "test:realtime": "node scripts/test-realtime.mjs",
-    "test:recovery": "node scripts/test-recovery.mjs"
+    "test:recovery": "node scripts/test-recovery.mjs",
+    "server:deploy": "node scripts/deploy-server.mjs"
   },
   "dependencies": {
     "@base-ui/react": "1.7.0",

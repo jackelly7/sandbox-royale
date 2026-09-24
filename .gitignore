@@ -41,5 +41,6 @@ next-env.d.ts
 *.tsbuildinfo
 
 # Local runtime credentials
+.neon
 .dev.vars*
 !.dev.vars.example
