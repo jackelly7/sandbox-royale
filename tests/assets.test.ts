@@ -142,10 +142,19 @@ void test('character skins are stable, keep hit targets, and animate from limb p
 });
 void test('asset refresh preserves the authoritative collision and loot layout', () => {
   const game = world();
-  assert.deepEqual(
-    game.colliders.map((b) => ({ min: b.min.toArray(), max: b.max.toArray() })),
-    MAP.colliders,
-  );
+  assert.equal(game.colliders.length, MAP.colliders.length);
+  // Trigonometry can differ in its last bits between CPU/Node platforms.
+  // Keep the exported collision layout check well below gameplay precision.
+  game.colliders.forEach((box, index) => {
+    for (const bound of ['min', 'max'] as const) {
+      box[bound].toArray().forEach((coordinate, axis) => {
+        assert.ok(
+          Math.abs(coordinate - MAP.colliders[index][bound][axis]) < 1e-10,
+          `Collider ${index} ${bound}[${axis}] differs from the exported map`,
+        );
+      });
+    }
+  });
   assert.deepEqual(
     game.loot.map((l) => ({
       x: l.mesh.position.x,
