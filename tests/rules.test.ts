@@ -7,6 +7,9 @@ import {
   reloadAmmo,
   WEAPONS,
   HEADSHOT_MULTIPLIER,
+  headshotMultiplier,
+  weaponDamage,
+  automaticWeapon,
   cycleWeapon,
 } from '../lib/game/rules.ts';
 
@@ -48,7 +51,29 @@ void test('fresh players survive any single full blast, including headshots', ()
   assert.ok(Math.ceil(150 / WEAPONS[0].damage) >= 10);
   assert.ok(Math.ceil(150 / (WEAPONS[1].damage * WEAPONS[1].pellets)) >= 2);
   assert.ok(
-    WEAPONS[2].damage * HEADSHOT_MULTIPLIER < 100,
-    'Sniper headshot cannot one-shot full health',
+    WEAPONS[2].damage * HEADSHOT_MULTIPLIER < 150,
+    'Common sniper headshot does not one-shot full health and starting shields',
   );
+});
+
+void test('Epic and Legendary sniper headshots eliminate full health and shields', () => {
+  for (const rarity of [2, 3]) {
+    const body = weaponDamage(2, 100, rarity);
+    assert.ok(body < 200);
+    assert.deepEqual(
+      takeDamage(100, 100, body * headshotMultiplier(2, rarity)),
+      { health: 0, shield: 0 },
+    );
+  }
+  assert.ok(weaponDamage(2, 100, 1) * headshotMultiplier(2, 1) < 200);
+});
+void test('Gun Game opening and precision stages are more forgiving', () => {
+  assert.equal(weaponDamage(3, 10, 0, 'gun-game'), 34);
+  assert.equal(Math.ceil(150 / weaponDamage(3, 10, 0, 'gun-game')), 5);
+  assert.equal(weaponDamage(6, 10, 0, 'gun-game'), 46);
+  assert.equal(weaponDamage(7, 10, 0, 'gun-game'), 60);
+  for (const weapon of [1, 2, 3, 6, 7]) {
+    assert.equal(automaticWeapon(weapon, 'gun-game'), true);
+    assert.equal(automaticWeapon(weapon), false);
+  }
 });

@@ -10,6 +10,7 @@ import { arenaLoadout, type DeathSpot } from '../lib/game/gun-game.ts';
 import {
   GUN_COLLIDERS,
   arenaStep,
+  arenaMove,
   arenaGround,
 } from '../lib/game/gun-arena.ts';
 import {
@@ -77,7 +78,7 @@ import { randomUUID } from 'node:crypto';
 import { MAP } from '../lib/game/map-data.ts';
 import {
   WEAPONS,
-  HEADSHOT_MULTIPLIER,
+  headshotMultiplier,
   shotDirection,
   weaponDamage,
   takeDamage,
@@ -1004,31 +1005,39 @@ function move(room: Room, p: Member, pose: PlayerPose, now: number) {
     Math.hypot(pose.x, pose.z) <=
       (isArenaMode(room.mode) ? GUN_RADIUS : ARENA_RADIUS) + 0.1
   ) {
-    let clear = true,
-      feet = p.y - 1.7;
-    const steps = Math.max(1, Math.ceil(distance / 0.25));
-    for (let i = 1; i <= steps && !p.dropping; i++) {
-      const x = p.x + (dx * i) / steps,
-        z = p.z + (dz * i) / steps;
-      if (isArenaMode(room.mode)) {
-        const next = arenaStep(x, z, feet);
-        if (next === null) {
+    if (room.mode === 'gun-game') {
+      const next = arenaMove(p, dx, dz);
+      p.credit -= Math.hypot(next.x - p.x, next.z - p.z);
+      p.x = next.x;
+      p.y = next.y;
+      p.z = next.z;
+    } else {
+      let clear = true,
+        feet = p.y - 1.7;
+      const steps = Math.max(1, Math.ceil(distance / 0.25));
+      for (let i = 1; i <= steps && !p.dropping; i++) {
+        const x = p.x + (dx * i) / steps,
+          z = p.z + (dz * i) / steps;
+        if (isArenaMode(room.mode)) {
+          const next = arenaStep(x, z, feet);
+          if (next === null) {
+            clear = false;
+            break;
+          }
+          feet = next;
+        } else if (
+          blocksBody(x, z, Math.min(p.y, pose.y) - 1.7, roomBounds(room))
+        ) {
           clear = false;
           break;
         }
-        feet = next;
-      } else if (
-        blocksBody(x, z, Math.min(p.y, pose.y) - 1.7, roomBounds(room))
-      ) {
-        clear = false;
-        break;
       }
-    }
-    if (clear) {
-      p.x = pose.x;
-      p.z = pose.z;
-      p.credit -= distance;
-      if (isArenaMode(room.mode)) p.y = Math.max(p.y, feet + 1.7);
+      if (clear) {
+        p.x = pose.x;
+        p.z = pose.z;
+        p.credit -= distance;
+        if (isArenaMode(room.mode)) p.y = Math.max(p.y, feet + 1.7);
+      }
     }
   }
   if (!p.dropping) {
@@ -1102,7 +1111,7 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
   >();
   for (let n = 0; n < w.pellets; n++) {
     if (room.phase === 'finished') break;
-    const dir = shotDirection(p.yaw, p.pitch, shotWeapon, aiming, n);
+    const dir = shotDirection(p.yaw, p.pitch, shotWeapon, aiming, n, room.mode);
     let nearest = w.range,
       target: Member | undefined;
     for (const box of roomBounds(room)) {
@@ -1147,8 +1156,15 @@ function shoot(room: Room, p: Member, aiming: boolean, now: number) {
         oldShield = target.shield;
       const amount = Math.min(
         oldHealth + oldShield,
-        weaponDamage(shotWeapon, nearest, p.tiers?.[shotWeapon] ?? 0) *
-          (headshot ? HEADSHOT_MULTIPLIER : 1),
+        weaponDamage(
+          shotWeapon,
+          nearest,
+          p.tiers?.[shotWeapon] ?? 0,
+          room.mode,
+        ) *
+          (headshot
+            ? headshotMultiplier(shotWeapon, p.tiers?.[shotWeapon] ?? 0)
+            : 1),
       );
       damageMember(room, target, amount, now, p);
       const hit = hits.get(target.id) ?? {
@@ -1228,6 +1244,13 @@ export function applyCommand(
   p.lastSeen = now;
   p.connected = true;
   if (!internal) advance(room, now);
+  if (
+    room.mode === 'gun-game' &&
+    'pose' in command &&
+    command.pose.spawnedAt !== undefined &&
+    command.pose.spawnedAt !== p.spawnedAt
+  )
+    return;
   if (command.type === 'leave') {
     if (
       !p.spectator &&

@@ -73,8 +73,8 @@ void test('weapons always replace their slot and ammo remains separate without d
   for (let r = 1; r < RARITIES.length; r++)
     assert.ok(weaponDamage(0, 10, r) > weaponDamage(0, 10, r - 1));
   assert.ok(
-    weaponDamage(2, 10, 3) * 1.5 < 150,
-    'A full health and starting shield player survives a legendary sniper headshot',
+    weaponDamage(2, 10, 3) > weaponDamage(2, 10, 0),
+    'Legendary sniper rounds deal more damage than common rounds',
   );
 });
 void test('eliminations drop equipment once and one player can claim each stack', () => {

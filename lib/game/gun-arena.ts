@@ -1,4 +1,4 @@
-import { blocksBody, groundAt, type Bounds } from './movement.ts';
+import { blocksBody, groundAt, type Bounds, type Point } from './movement.ts';
 export type ArenaBlock = {
   x: number;
   z: number;
@@ -99,4 +99,25 @@ export function arenaGround(x: number, z: number, feet: number) {
 export function arenaStep(x: number, z: number, feet: number) {
   const next = Math.max(feet, arenaGround(x, z, feet + 0.27));
   return blocksBody(x, z, next, GUN_COLLIDERS) ? null : next;
+}
+
+// Sweep in short steps and slide along walls using the same rule on both ends.
+export function arenaMove(position: Point, dx: number, dz: number) {
+  const result = { x: position.x, y: position.y, z: position.z };
+  const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.25));
+  for (let i = 0; i < steps; i++) {
+    const x = result.x + dx / steps;
+    const a = arenaStep(x, result.z, result.y - 1.7);
+    if (a !== null) {
+      result.x = x;
+      result.y = Math.max(result.y, a + 1.7);
+    }
+    const z = result.z + dz / steps;
+    const b = arenaStep(result.x, z, result.y - 1.7);
+    if (b !== null) {
+      result.z = z;
+      result.y = Math.max(result.y, b + 1.7);
+    }
+  }
+  return result;
 }

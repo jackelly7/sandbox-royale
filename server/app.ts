@@ -1,3 +1,4 @@
+import { serviceError } from './service-error.ts';
 import {
   cleanName,
   applyCommand,
@@ -103,7 +104,10 @@ export function attachSocket(socket: SocketLike) {
             });
             send(socket, { type: 'ready' });
           })
-          .catch(() => socket.close(4001, 'Room session unavailable'));
+          .catch((error) => {
+            send(socket, serviceError(error));
+            socket.close(4001, 'Room session unavailable');
+          });
         return;
       }
       session.lastMessage = Date.now();
@@ -197,13 +201,7 @@ const poll = setInterval(() => {
       })
       .catch((error) => {
         for (const { socket } of batch) {
-          send(socket, {
-            type: 'error',
-            message:
-              error instanceof GameError
-                ? error.message
-                : 'Connection interrupted. Reconnecting...',
-          });
+          send(socket, serviceError(error));
           socket.close(4004, 'Room unavailable');
         }
       })
@@ -256,10 +254,7 @@ export async function handleHttp(request: Request) {
       );
     } else response = json({ error: 'Not found.' }, 404);
   } catch (error) {
-    const err =
-      error instanceof GameError
-        ? error
-        : new GameError('The room service is unavailable. Try again.', 503);
+    const err = serviceError(error);
     console.error(error instanceof Error ? error.message : 'Request failed');
     response = json({ error: err.message }, err.status);
   }

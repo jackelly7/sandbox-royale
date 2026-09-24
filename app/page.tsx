@@ -123,7 +123,7 @@ const controls = [
   ['MOUSE', 'Look around'],
   ['LEFT CLICK', 'Fire / punch when unarmed'],
   ['B', 'Melee attack'],
-  ['RIGHT CLICK / RIGHT ⌘', 'Aim down sights'],
+  ['RIGHT CLICK / Z', 'Aim down sights'],
   ['SHIFT', 'Sprint'],
   ['C / CTRL', 'Toggle crouch / hold crouch'],
   ['SPACE', 'Jump from bus / jump / mantle'],
@@ -539,7 +539,14 @@ export default function Home() {
             setPanel(null);
           roomPhase.current = next.phase;
         },
-        setConnection,
+        (status) => {
+          setConnection(status);
+          if (status === 'connected') setRoomError('');
+          if (status === 'offline') {
+            game.current?.pause();
+            setPanel('friends');
+          }
+        },
         setRoomError,
       );
       game.current.attachNetwork(joined.playerId, (command) =>

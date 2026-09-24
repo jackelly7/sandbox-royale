@@ -20,7 +20,7 @@ void test('delayed poses subtract corrections already applied without losing new
   assert.equal(history.error({ x: -30, z: 50 }, second), undefined);
 });
 
-void test('right Command holds ADS, cooperates with mouse aim, and clears on map/pause/blur', (t) => {
+void test('Z holds ADS, cooperates with mouse aim, and clears on map/pause/blur', (t) => {
   const doc = new EventTarget();
   const win = new EventTarget();
   const canvas = new EventTarget();
@@ -65,43 +65,44 @@ void test('right Command holds ADS, cooperates with mouse aim, and clears on map
     (type === 'mousedown' ? canvas : doc).dispatchEvent(event);
   };
   key('MetaLeft');
-  assert.ok(!game.aiming, 'Left Command retains its normal behavior');
-  assert.equal(key('MetaRight').defaultPrevented, true);
+  key('MetaRight');
+  assert.ok(!game.aiming, 'Neither Command key activates aim');
+  assert.equal(key('KeyZ').defaultPrevented, true);
   assert.equal(game.aiming, true);
-  key('MetaRight', 'keydown', true);
+  key('KeyZ', 'keydown', true);
   assert.equal(game.aiming, true);
   mouse('mousedown');
-  key('MetaRight', 'keyup');
+  key('KeyZ', 'keyup');
   assert.equal(game.aiming, true, 'Mouse still holds aim');
   mouse('mouseup');
   assert.equal(game.aiming, false);
-  key('MetaRight');
+  key('KeyZ');
   mouse('mousedown');
   mouse('mouseup');
-  assert.equal(game.aiming, true, 'Command still holds aim');
+  assert.equal(game.aiming, true, 'Z still holds aim');
   assert.equal(
     key('KeyW').defaultPrevented,
-    true,
-    'Command+W must not close the game',
+    false,
+    'Z+W is ordinary movement, with no browser modifier',
   );
-  key('MetaRight', 'keyup');
+  key('KeyZ', 'keyup');
   assert.equal(game.aiming, false);
   assert.equal(
-    game.keys.size,
-    0,
-    'Do not leave movement stuck after suppressed macOS keyups',
+    game.keys.has('KeyW'),
+    true,
+    'Releasing aim must not interrupt forward movement',
   );
-  key('MetaRight');
+  key('KeyZ');
   game.toggleMap();
   assert.equal(game.aiming, false);
-  key('MetaRight');
+  key('KeyZ');
   assert.equal(game.aiming, false, 'No aim while map is open');
   game.toggleMap();
-  key('MetaRight');
+  key('KeyZ');
   win.dispatchEvent(new Event('blur'));
   assert.equal(game.aiming, false);
   assert.equal(game.state.phase, 'paused');
   assert.equal(game.keys.size, 0);
-  key('MetaRight');
+  key('KeyZ');
   assert.equal(game.aiming, false, 'No aim while paused');
 });

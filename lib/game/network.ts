@@ -63,6 +63,7 @@ export class MultiplayerClient {
   retry = 0;
   receivedRoom = false;
   sequence = 0;
+  lastSentSequence = 0;
   sentPoses = new Map<number, PlayerPose>();
   timer: ReturnType<typeof setTimeout> | null = null;
   pending: { seq: number; command: Command }[] = [];
@@ -92,21 +93,28 @@ export class MultiplayerClient {
   connect() {
     if (this.closed) return;
     this.socketReady = false;
+    this.lastSentSequence = 0;
     this.lastServer = Date.now();
     const socket = (this.socket = new WebSocket(REALTIME_URL));
     socket.onopen = () =>
       socket.send(JSON.stringify({ type: 'auth', ...this.session }));
     socket.onmessage = (event) => {
       if (this.closed || this.socket !== socket) return;
-      this.lastServer = Date.now();
       try {
         const message = JSON.parse(event.data);
         if (message.type === 'ready') {
           this.socketReady = true;
           this.flush();
         }
-        if (message.type === 'error') this.onError(message.message);
+        if (message.type === 'error') {
+          this.onError(message.message);
+          if (message.retryable === false) {
+            this.close(false);
+            return;
+          }
+        }
         if (message.type === 'snapshot') {
+          this.lastServer = Date.now();
           this.retry = 0;
           this.receivedRoom = true;
           const acknowledged = [...this.sentPoses.entries()]
@@ -123,6 +131,7 @@ export class MultiplayerClient {
     };
     socket.onerror = () => socket.close();
     socket.onclose = () => {
+      if (this.socket !== socket) return;
       if (this.beat) clearInterval(this.beat);
       this.beat = null;
       this.socketReady = false;
@@ -142,6 +151,7 @@ export class MultiplayerClient {
       );
     };
     this.beat = setInterval(() => {
+      // Pongs prove the socket is alive, not that the match is advancing.
       if (Date.now() - this.lastServer > 8000) {
         socket.close();
         return;
@@ -161,18 +171,26 @@ export class MultiplayerClient {
     )
       return;
     if (this.pose) {
-      this.pending = this.pending.filter((a) => a.command.type !== 'pose');
+      // Coalesce only the trailing pose. A pose before an action must retain
+      // its place so a queued pickup/shot uses the position at that moment.
+      if (this.pending.at(-1)?.command.type === 'pose') this.pending.pop();
       this.pending.push({ seq: ++this.sequence, command: this.pose });
       this.pose = null;
     }
     if (!this.pending.length) return;
-    const actions = this.pending.slice(0, 24);
+    // WebSocket delivers in order. Retry unacknowledged actions only after
+    // reconnecting, rather than multiplying traffic when the server is busy.
+    const actions = this.pending
+      .filter((action) => action.seq > this.lastSentSequence)
+      .slice(0, 24);
+    if (!actions.length) return;
     for (const action of actions)
       if (action.command.type === 'pose' || action.command.type === 'shoot')
         this.sentPoses.set(action.seq, action.command.pose);
     while (this.sentPoses.size > 256)
       this.sentPoses.delete(this.sentPoses.keys().next().value!);
     this.socket.send(JSON.stringify({ type: 'commands', actions }));
+    this.lastSentSequence = actions.at(-1)!.seq;
   }
   static async enter(name: string, code?: string) {
     const { response, data: value } = await requestRoom(
@@ -196,7 +214,9 @@ export class MultiplayerClient {
     this.timer = null;
     const started = Date.now();
     if (this.pose) {
-      this.pending = this.pending.filter((a) => a.command.type !== 'pose');
+      // Coalesce only the trailing pose. A pose before an action must retain
+      // its place so a queued pickup/shot uses the position at that moment.
+      if (this.pending.at(-1)?.command.type === 'pose') this.pending.pop();
       this.pending.push({ seq: ++this.sequence, command: this.pose });
       this.pose = null;
     }
@@ -272,7 +292,7 @@ export class MultiplayerClient {
       return;
     }
     if (command.type === 'ping') return;
-    if (this.pending.length < 24) {
+    if (this.pending.filter((a) => a.command.type !== 'pose').length < 24) {
       if (this.pose) {
         this.pending.push({ seq: ++this.sequence, command: this.pose });
         this.pose = null;

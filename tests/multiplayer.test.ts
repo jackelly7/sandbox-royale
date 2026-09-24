@@ -537,3 +537,41 @@ void test('server accepts the expanded map while still rejecting travel beyond i
   assert.equal(p.z, ARENA_RADIUS - 1);
   assert.equal(snapshot(room, at + 7000).zone?.radius, INITIAL_CIRCLE);
 });
+
+void test('authoritative Epic and Legendary sniper headshots eliminate a fully shielded player', (t) => {
+  t.mock.method(Math, 'random', () => 0);
+  for (const rarity of [2, 3]) {
+    const room = waiting();
+    applyCommand(room, 'host', { type: 'mode', mode: 'gun-game' }, at);
+    applyCommand(room, 'host', { type: 'start' }, at);
+    const [p, q] = room.players;
+    Object.assign(p, {
+      x: 0,
+      y: 1.7,
+      z: 27,
+      yaw: 0,
+      pitch: Math.atan2(0.25, 5),
+      weapon: 2,
+      protectedUntil: 0,
+    });
+    Object.assign(q, {
+      x: 0,
+      y: 1.7,
+      z: 22,
+      health: 100,
+      shield: 100,
+      protectedUntil: 0,
+    });
+    p.owned[2] = true;
+    p.ammo[2] = 5;
+    p.tiers![2] = rarity;
+    applyCommand(
+      room,
+      p.id,
+      { type: 'shoot', pose: { ...p }, aiming: true },
+      at + 5001,
+    );
+    assert.equal(q.health, 0, `Rarity ${rarity} headshot must be lethal`);
+    assert.equal(p.kills, 1);
+  }
+});
