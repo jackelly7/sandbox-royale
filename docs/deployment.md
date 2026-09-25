@@ -1,12 +1,18 @@
 # Hosting and automatic deployment
 
-Use Cloudflare Workers for the Vinext website and its static assets. Keep the existing Neon Postgres database and Neon Function for multiplayer in AWS us-east-2. The game already uses these runtimes, so this avoids a backend rewrite. Assets under `public/` ship with the website; no separate object storage is needed. Source stays in the private GitHub repository.
+**Public game: [sandbox-royale.reactjack7.workers.dev](https://sandbox-royale.reactjack7.workers.dev)**
 
-## One-time setup
+Cloudflare Workers hosts the Vinext website and its static assets. Neon Postgres and a Neon Function host multiplayer in AWS us-east-2. Both use free plans; do not enable paid upgrades. Assets under `public/` ship with the website; no separate object storage is needed. Source stays in the private GitHub repository.
+
+## Production configuration
+
+Automatic deployment is configured in `.github/workflows/deploy.yml`. The Worker is `sandbox-royale`. The current Neon project, branch, Function slug and public backend origin are in `server/deployment.json`; the browser, API proxy and scenario tests share that origin through `lib/game/network-config.ts`.
+
+The following steps document how to recreate the setup.
 
 1. Create or sign into a Cloudflare Free account. Enable its workers.dev subdomain in Workers & Pages. The worker name is `sandbox-royale`, so the website URL will be `https://sandbox-royale.<your-subdomain>.workers.dev`. A custom domain is optional.
-2. Create a Cloudflare API token using the **Edit Cloudflare Workers** template, scoped to that account. Copy the account ID from the dashboard.
-3. Create a Neon API key with access to the existing `winter-base-44302343` project. Use that project's existing multiplayer database connection string, not a new empty database. The production branch and Function slug are recorded in `server/deployment.json`.
+2. Create a Cloudflare API token with **Account > Workers Scripts > Edit**, scoped to that account. Copy the account ID from the dashboard.
+3. Create a Neon API key with access to the project identified in `server/deployment.json`. Use that project's existing multiplayer database connection string, not a new empty database. The production branch and Function slug are recorded in `server/deployment.json`.
 4. In GitHub, open **Settings > Environments**, create `production`, and restrict deployment branches to `main`. Leave required reviewers off for automatic deployment. Add these environment secrets:
 
    | Secret | Value |
@@ -19,9 +25,9 @@ Use Cloudflare Workers for the Vinext website and its static assets. Keep the ex
    Add the environment variable `PRODUCTION_URL` with the exact HTTPS website origin, without a trailing slash. Never paste credentials into code, chat, or a workflow file.
 5. Merge the deployment changes into `main`. Check **Actions > Check and deploy**. Later merges run the same workflow automatically. To retry, use **Run workflow** on `main`.
 
-The workflow checks tests, TypeScript, lint and both builds before deployment. Pull requests only run checks. It uploads the checked artifacts, deploys the Neon Function first, then the Cloudflare website with its runtime database secret, and runs the existing two-player integration test against the website. That test now sends the website's Origin header on its WebSocket connections to catch a missing allowlist entry. It creates a temporary test room.
+The workflow checks tests, TypeScript, lint and both builds before deployment. Pull requests only run checks. It uploads the checked artifacts, deploys the Neon Function first, then the Cloudflare website with its runtime database secret, waits for the website to respond over HTTPS, and runs the room-join integration test against the website. That test now sends the website's Origin header on its WebSocket connections to catch a missing allowlist entry. It creates a temporary test room.
 
-`ALLOWED_ORIGINS` on the Neon Function is set from `PRODUCTION_URL`. The original Sites URL and local development origins remain supported. If you add more domains, update the deployment script to pass all intended origins, comma-separated.
+`ALLOWED_ORIGINS` on the Neon Function is set from `PRODUCTION_URL`. Local development origins on port 3000 remain supported. If you add more domains, update the deployment script to pass all intended origins, comma-separated.
 
 GitHub Actions owns deployment. Do not also enable Cloudflare Git builds for the same worker. Protect `main` with the `check` status check if you want GitHub to require passing checks before merging.
 
@@ -37,9 +43,9 @@ Published limits checked September 23, 2026:
 
 Sources: [Cloudflare pricing](https://developers.cloudflare.com/workers/platform/pricing/), [Cloudflare limits](https://developers.cloudflare.com/workers/platform/limits/), [Neon pricing](https://neon.com/pricing). GitHub Actions also has a monthly included allowance for private repositories; usage depends on the GitHub account's plan and build frequency.
 
-This is a sensible $0 starting configuration for light use, not a promise of unlimited free multiplayer. The existing Neon project reports about 90 MB of storage and about 7.0 GB of data transfer for its September billing period. That transfer counter alone does not establish billable public egress, but it warrants checking the Neon usage dashboard before relying on the 5 GB allowance. The project currently reports the Free plan.
+Free hosting is limited. The previous multiplayer project exhausted its quota in September 2026 and the database rejected room requests. A fresh project was initialized with the schema; old room codes were not migrated. Device-local settings and solo personal bests are unaffected. This is a one-time backend replacement, not automatic project rotation.
 
-Cloudflare's next step is Workers Paid, starting at $5/month. Neon paid usage depends on runtime, storage and transfer. Keep free plans initially and inspect usage after real matches; do not upgrade automatically. Neon's scale-to-zero can add a delay to the first room request after inactivity. Players far from Ohio will also have higher gameplay latency even though website assets are served nearby.
+Watch compute and transfer usage in Neon after real matches. A new project can reach the same limits. The app does not upgrade plans automatically. Scale-to-zero reduces idle compute but can delay the first room request. Players far from Ohio have higher gameplay latency even though website assets are served nearby.
 
 ## Recovery and database changes
 
@@ -49,4 +55,15 @@ To roll back both components, revert the bad commit through a pull request and m
 
 The workflow does not apply database schema changes. The existing database already has `server/schema.sql`. For a new database, apply that schema once before deployment. Review future migrations separately and apply backward-compatible migrations before merging code that requires them.
 
-The old Sites deployment is separate and will not update from this workflow. Share the new Cloudflare URL after the first successful deploy, or attach a custom domain in Cloudflare.
+Share the public Cloudflare URL above. The former ChatGPT Sites URL is retired and does not receive these deployments.
+
+## Replacing the multiplayer backend
+
+1. Create a project in the existing free Neon organization, in `aws-us-east-2`, with a `lastlight` database and `lastlight_owner` role. Keep the free plan and minimum compute.
+2. Apply `server/schema.sql` to the new database. This creates empty room, command and rate-limit tables.
+3. Update the project and branch in `server/deployment.json`. Build and deploy the Function using `npm run server:build` and `SITE_TEST_URL=https://sandbox-royale.reactjack7.workers.dev npm run server:deploy`. This requires an authenticated Neon CLI or `NEON_API_KEY`.
+4. Set `url` in `server/deployment.json` to the actual invocation URL returned by Neon, without a trailing slash. Do not guess the cluster hostname.
+5. Test the new backend. Replace the GitHub production secrets `NEON_API_KEY` with a key scoped to the new project and `MULTIPLAYER_DATABASE_URL` with its connection string before merging. Update any ignored local `.dev.vars` separately.
+6. Merge and verify the GitHub deployment and public-site integration test. Existing rooms do not carry over; players must refresh the website and create new rooms. Keep the previous project until the switch is verified.
+
+If a deployment publishes successfully but the integration test fails, inspect the Neon Function logs and GitHub job output. A quota-exceeded database error requires waiting for the allowance to reset or a separately approved hosting change. Retrying deployment alone will not restore the allowance.

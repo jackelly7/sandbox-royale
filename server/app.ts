@@ -40,7 +40,6 @@ const origins = new Set([
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean),
-  'https://lastlight-battle-royale.jack794585.chatgpt.site',
   'http://localhost:3000',
   'http://127.0.0.1:3000',
 ]);

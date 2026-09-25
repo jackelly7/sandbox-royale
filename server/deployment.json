@@ -1,6 +1,7 @@
 {
-  "project_id": "winter-base-44302343",
-  "branch_id": "br-frosty-surf-a5j1d8vg",
+  "project_id": "withered-moon-41147020",
+  "branch_id": "br-red-bar-b4fdxnhg",
   "region": "aws-us-east-2",
-  "slug": "lastlight"
+  "slug": "lastlight",
+  "url": "https://br-red-bar-b4fdxnhg-lastlight.compute.c-6.us-east-2.aws.neon.tech"
 }

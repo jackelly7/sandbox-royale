@@ -1,3 +1,4 @@
+import { MULTIPLAYER_ORIGIN } from '../../../lib/game/network-config';
 import { env } from 'cloudflare:workers';
 import { multiplayerRequest } from '../../../server/http';
 export async function POST(request: Request) {
@@ -25,10 +26,9 @@ export async function POST(request: Request) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
-      const origin =
-        'https://br-frosty-surf-a5j1d8vg-lastlight.compute.c-1.us-east-2.aws.neon.tech';
       const response = await fetch(
-        origin + (data.type === 'join' ? `/rooms/${code}/join` : '/rooms'),
+        MULTIPLAYER_ORIGIN +
+          (data.type === 'join' ? `/rooms/${code}/join` : '/rooms'),
         {
           method: data.type === 'list' ? 'GET' : 'POST',
           headers: {
