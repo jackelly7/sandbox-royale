@@ -30,6 +30,8 @@ jobs:
       - run: npx tsc --noEmit
       - run: npm run lint
       - run: npm run build
+      - name: Verify built Worker rendering
+        run: node scripts/test-worker.mjs
       - run: npm run server:build
       - uses: actions/upload-artifact@v4
         with:

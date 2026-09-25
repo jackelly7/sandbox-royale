@@ -44,10 +44,11 @@ export function FriendsRoom({
   command: (command: Command) => void;
   practice?: () => void;
 }) {
-  const [name, setName] = useState(accountName || ''),
+  const [guestName, setName] = useState(''),
     [code, setCode] = useState(inviteCode),
     [copied, setCopied] = useState(false),
     [copyError, setCopyError] = useState('');
+  const name = accountName || guestName;
   const isHost = room?.host === session?.playerId;
   const share = async () => {
     try {
@@ -72,7 +73,7 @@ export function FriendsRoom({
         <label htmlFor="player-name">Your player name</label>
         <Input
           id="player-name"
-          value={accountName || name}
+          value={name}
           disabled={!!accountName}
           onChange={(e) => setName(e.target.value)}
           maxLength={18}

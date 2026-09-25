@@ -1,12 +1,12 @@
 'use client';
-import { createAuthClient } from '@neondatabase/auth/next';
+import { createAuthClient } from 'better-auth/react';
 export const authClient = createAuthClient();
 export async function accountHeaders(): Promise<Record<string, string>> {
   const { data, error } = await authClient.getSession();
   if (error) throw new Error('Could not check your account. Please try again.');
   if (!data?.user) return {};
-  // Fetch the JWT endpoint directly: the SDK's token() shares its getSession
-  // cache, which can contain an opaque cookie token instead of a JWT.
+  // Session cookies are opaque; the JWT endpoint issues the token that the
+  // multiplayer server verifies against Neon's signing keys.
   const response = await fetch('/api/auth/token', { cache: 'no-store' });
   const result = (await response.json()) as { token?: string };
   if (!response.ok || !result.token)
