@@ -20,6 +20,7 @@ import type {
   RoomSnapshot,
 } from '@/lib/game/multiplayer';
 export function FriendsRoom({
+  accountName,
   room,
   session,
   status,
@@ -31,6 +32,7 @@ export function FriendsRoom({
   command,
   practice,
 }: {
+  accountName?: string;
   room: RoomSnapshot | null;
   session: RoomSession | null;
   status: ConnectionStatus;
@@ -42,7 +44,7 @@ export function FriendsRoom({
   command: (command: Command) => void;
   practice?: () => void;
 }) {
-  const [name, setName] = useState(''),
+  const [name, setName] = useState(accountName || ''),
     [code, setCode] = useState(inviteCode),
     [copied, setCopied] = useState(false),
     [copyError, setCopyError] = useState('');
@@ -70,7 +72,8 @@ export function FriendsRoom({
         <label htmlFor="player-name">Your player name</label>
         <Input
           id="player-name"
-          value={name}
+          value={accountName || name}
+          disabled={!!accountName}
           onChange={(e) => setName(e.target.value)}
           maxLength={18}
           placeholder="Choose a callsign"

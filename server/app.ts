@@ -1,3 +1,4 @@
+import { identify, ensureAccount, accountHttp } from './account.ts';
 import { serviceError } from './service-error.ts';
 import {
   cleanName,
@@ -229,6 +230,8 @@ export async function handleHttp(request: Request) {
       response = new Response(null, { status: 204 });
     else if (url.pathname === '/health')
       response = json({ ok: true, service: 'lastlight-multiplayer' });
+    else if (url.pathname.startsWith('/account'))
+      response = await accountHttp(request);
     else if (request.method === 'GET' && url.pathname === '/rooms')
       response = json({ rooms: await listRooms() });
     else if (
@@ -241,14 +244,16 @@ export async function handleHttp(request: Request) {
       const body = await request.text();
       if (body.length > 1024) throw new GameError('Request too large.', 413);
       const data = JSON.parse(body) as { name?: unknown };
-      const name = cleanName(data.name);
+      const account = await identify(request);
+      if (account) await ensureAccount(account);
+      const name = account?.name ?? cleanName(data.name);
       await rateLimit(
         request.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown',
       );
       response = json(
         url.pathname === '/rooms'
-          ? await create(name)
-          : await join(url.pathname.split('/')[2], name),
+          ? await create(name, account?.id)
+          : await join(url.pathname.split('/')[2], name, account?.id),
         201,
       );
     } else response = json({ error: 'Not found.' }, 404);
@@ -261,7 +266,7 @@ export async function handleHttp(request: Request) {
     response.headers.set('Access-Control-Allow-Origin', origin);
   response.headers.set('Vary', 'Origin');
   response.headers.set('Cache-Control', 'no-store');
-  response.headers.set('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
-  response.headers.set('Access-Control-Allow-Headers', 'Content-Type');
+  response.headers.set('Access-Control-Allow-Methods', 'POST, GET, PUT, OPTIONS');
+  response.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
   return response;
 }

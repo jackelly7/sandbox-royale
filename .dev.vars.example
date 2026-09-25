@@ -4,3 +4,6 @@
 # Apply server/schema.sql to it first. Ask Jack for the shared dev branch URL,
 # or point this at any Postgres instance you control.
 MULTIPLAYER_DATABASE_URL=postgresql://user:password@host/dbname?sslmode=require
+
+# Generate with openssl rand -base64 32. Use a different secret per environment.
+NEON_AUTH_COOKIE_SECRET=replace-with-a-random-secret-of-at-least-32-characters

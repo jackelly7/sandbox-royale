@@ -12,6 +12,7 @@ async function requestRoom(
   body: unknown,
   timeout: number,
   signal?: AbortSignal,
+  headers: Record<string, string> = {},
 ) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeout);
@@ -21,7 +22,7 @@ async function requestRoom(
   try {
     const response = await fetch(MULTIPLAYER_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
       signal: controller.signal,
     });
@@ -192,7 +193,11 @@ export class MultiplayerClient {
     this.socket.send(JSON.stringify({ type: 'commands', actions }));
     this.lastSentSequence = actions.at(-1)!.seq;
   }
-  static async enter(name: string, code?: string) {
+  static async enter(
+    name: string,
+    code?: string,
+    headers: Record<string, string> = {},
+  ) {
     const { response, data: value } = await requestRoom(
       {
         type: code ? 'join' : 'create',
@@ -200,6 +205,8 @@ export class MultiplayerClient {
         code: code?.trim().toUpperCase(),
       },
       12000,
+      undefined,
+      headers,
     );
     const data = value as Partial<RoomSession> & { error?: string };
     if (!data || typeof data !== 'object')

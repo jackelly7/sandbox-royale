@@ -33,6 +33,7 @@ export async function POST(request: Request) {
           method: data.type === 'list' ? 'GET' : 'POST',
           headers: {
             'Content-Type': 'application/json',
+            Authorization: request.headers.get('authorization') || '',
             'X-Forwarded-For':
               request.headers.get('cf-connecting-ip') ||
               request.headers.get('x-forwarded-for')?.split(',')[0] ||
