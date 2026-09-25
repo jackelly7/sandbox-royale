@@ -1,4 +1,6 @@
+import { WEAPONS } from './rules.ts';
 export type Preferences = {
+  arenaWeapon: number;
   look: number;
   aim: number;
   crosshairSize: number;
@@ -10,6 +12,7 @@ export type Preferences = {
   visualSound: boolean;
 };
 export const DEFAULT_PREFERENCES: Preferences = {
+  arenaWeapon: 0,
   look: 1,
   aim: 0.7,
   crosshairSize: 1,
@@ -29,6 +32,13 @@ export function cleanPreferences(value: unknown): Preferences {
       ? Math.min(max, Math.max(min, v))
       : fallback;
   return {
+    arenaWeapon:
+      typeof p.arenaWeapon === 'number' &&
+      Number.isInteger(p.arenaWeapon) &&
+      p.arenaWeapon >= 0 &&
+      p.arenaWeapon < WEAPONS.length
+        ? p.arenaWeapon
+        : 0,
     look: num(p.look, 0.3, 2.5, 1),
     aim: num(p.aim, 0.2, 2, 0.7),
     crosshairSize: num(p.crosshairSize, 0.7, 1.5, 1),

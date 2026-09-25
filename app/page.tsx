@@ -1,4 +1,6 @@
 'use client';
+import { accountHeaders } from '../lib/auth/client';
+import { PlayerAccount, usePlayerAccount } from '../components/player-account';
 import { isArenaMode } from '@/lib/game/modes';
 import {
   DEFAULT_PREFERENCES,
@@ -478,7 +480,7 @@ export default function Home() {
     [ready, setReady] = useState(false),
     [error, setError] = useState('');
   const [panel, setPanel] = useState<
-    'controls' | 'settings' | 'map' | 'friends' | null
+    'controls' | 'settings' | 'map' | 'friends' | 'account' | null
   >(null);
   const [visualSound, setVisualSound] = useState(true);
   const [preferences, setPreferences] =
@@ -491,6 +493,15 @@ export default function Home() {
   const [muted, setMuted] = useState(false),
     [touch, setTouch] = useState(false),
     [best, setBest] = useState(0);
+  const account = usePlayerAccount(
+    preferences,
+    (p) => {
+      updatePreferences(p);
+      setMuted(p.muted);
+      setVisualSound(p.visualSound);
+    },
+    ready,
+  );
   const client = useRef<MultiplayerClient | null>(null);
   const [room, setRoom] = useState<RoomSnapshot | null>(null),
     [session, setSession] = useState<RoomSession | null>(null),
@@ -517,7 +528,11 @@ export default function Home() {
     setRoomBusy(true);
     setRoomError('');
     try {
-      const joined = await MultiplayerClient.enter(name, code);
+      const joined = await MultiplayerClient.enter(
+        name,
+        code,
+        await accountHeaders(),
+      );
       setSession(joined);
       roomPhase.current = 'waiting';
       client.current = new MultiplayerClient(
@@ -609,6 +624,8 @@ export default function Home() {
           const invite = new URLSearchParams(window.location.search).get(
             'room',
           );
+          if (new URLSearchParams(window.location.search).has('account'))
+            setPanel('account');
           if (invite && /^[A-Z2-9]{6}$/i.test(invite)) {
             setInviteCode(invite.toUpperCase());
             setPanel('friends');
@@ -735,12 +752,18 @@ export default function Home() {
               >
                 <Settings2 size={20} />
               </button>
-              <div className="player-badge">
-                <span className="player-avatar">J</span>
+              <button
+                className="player-badge"
+                onClick={() => setPanel('account')}
+              >
+                <span className="player-avatar">
+                  {account.user?.name?.[0]?.toUpperCase() || '?'}
+                </span>
                 <div>
-                  Rookie<span>READY TO DROP</span>
+                  {account.user?.name || 'Sign in'}
+                  <span>STATS & LEADERBOARD</span>
                 </div>
-              </div>
+              </button>
             </div>
           </header>
           <div className="lobby-main">
@@ -2085,25 +2108,33 @@ export default function Home() {
           className={`game-dialog ${panel === 'map' ? 'map-dialog' : ''}`}
         >
           <DialogTitle>
-            {panel === 'friends'
-              ? 'BRING YOUR FRIENDS.'
-              : panel === 'controls'
-                ? 'KNOW YOUR MOVES.'
-                : panel === 'settings'
-                  ? 'MAKE IT YOURS.'
-                  : 'KNOW THE SANDBOX.'}
+            {panel === 'account'
+              ? 'YOUR SANDBOX.'
+              : panel === 'friends'
+                ? 'BRING YOUR FRIENDS.'
+                : panel === 'controls'
+                  ? 'KNOW YOUR MOVES.'
+                  : panel === 'settings'
+                    ? 'MAKE IT YOURS.'
+                    : 'KNOW THE SANDBOX.'}
           </DialogTitle>
           <DialogDescription>
-            {panel === 'friends'
-              ? 'Your friends. Your sandbox. Last team standing.'
-              : panel === 'controls'
-                ? 'Find supplies, stay inside the storm, and outlast your rivals.'
-                : panel === 'settings'
-                  ? 'Choose a mode, invite friends, and play.'
-                  : 'Sandcastle Square. Find cover, loot, and your next landing spot.'}
+            {panel === 'account'
+              ? 'Your account, setup, and online record.'
+              : panel === 'friends'
+                ? 'Your friends. Your sandbox. Last team standing.'
+                : panel === 'controls'
+                  ? 'Find supplies, stay inside the storm, and outlast your rivals.'
+                  : panel === 'settings'
+                    ? 'Choose a mode, invite friends, and play.'
+                    : 'Sandcastle Square. Find cover, loot, and your next landing spot.'}
           </DialogDescription>
+          {panel === 'account' && (
+            <PlayerAccount account={account} inRoom={!!session} />
+          )}
           {panel === 'friends' && (
             <FriendsRoom
+              accountName={account.user?.name}
               practice={practice}
               room={room}
               session={session}
@@ -2117,6 +2148,11 @@ export default function Home() {
               leave={leaveRoom}
               command={(command) => {
                 setRoomError('');
+                if (command.type === 'loadout')
+                  updatePreferences({
+                    ...preferences,
+                    arenaWeapon: command.weapon,
+                  });
                 client.current?.send(command);
               }}
             />

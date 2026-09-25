@@ -1,3 +1,4 @@
+import { cleanPreferences } from '../lib/game/preferences.ts';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { Pool } from 'pg';
 import { activeRoom, ACTIVE_ROOMS_QUERY } from './directory.ts';
@@ -52,17 +53,26 @@ export async function transact<T>(
     client.release();
   }
 }
-export async function create(name: string) {
+async function savedLoadout(accountId?: string) {
+  if (!accountId) return 0;
+  const { rows } = await pool.query(
+    'SELECT preferences FROM lastlight_accounts WHERE id=$1',
+    [accountId],
+  );
+  return cleanPreferences(rows[0]?.preferences).arenaWeapon;
+}
+export async function create(name: string, accountId?: string) {
   const token = randomBytes(32).toString('base64url'),
     id = randomUUID(),
     now = Date.now();
+  const loadout = await savedLoadout(accountId);
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   for (let attempt = 0; attempt < 5; attempt++) {
     const bytes = randomBytes(6),
       code = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join('');
     const room = createRoom(
       code,
-      createMember(id, name, hash(token), now),
+      { ...createMember(id, name, hash(token), now), accountId, loadout },
       now,
     );
     const result = await pool.query(
@@ -73,12 +83,22 @@ export async function create(name: string) {
   }
   throw new GameError('Could not create a room. Try again.', 503);
 }
-export async function join(code: string, name: string) {
+export async function join(code: string, name: string, accountId?: string) {
   const token = randomBytes(32).toString('base64url'),
     id = randomUUID();
+  const loadout = await savedLoadout(accountId);
   await transact(code, (room) => {
     advance(room, Date.now());
-    addMember(room, createMember(id, name, hash(token), Date.now()));
+    if (accountId && room.players.some((p) => p.accountId === accountId))
+      throw new GameError(
+        'This account is already in the room. Leave the other session first.',
+        409,
+      );
+    addMember(room, {
+      ...createMember(id, name, hash(token), Date.now()),
+      accountId,
+      loadout,
+    });
   });
   return { code, playerId: id, token };
 }

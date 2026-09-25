@@ -3,5 +3,6 @@
   "branch_id": "br-red-bar-b4fdxnhg",
   "region": "aws-us-east-2",
   "slug": "lastlight",
-  "url": "https://br-red-bar-b4fdxnhg-lastlight.compute.c-6.us-east-2.aws.neon.tech"
+  "url": "https://br-red-bar-b4fdxnhg-lastlight.compute.c-6.us-east-2.aws.neon.tech",
+  "auth_url": "https://ep-morning-firefly-b4ws0zra.neonauth.c-6.us-east-2.aws.neon.tech/lastlight/auth"
 }

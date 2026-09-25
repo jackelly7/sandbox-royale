@@ -21,11 +21,13 @@ The following steps document how to recreate the setup.
    | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID |
    | `NEON_API_KEY` | Key allowed to deploy the existing Function |
    | `MULTIPLAYER_DATABASE_URL` | Connection string for the existing multiplayer database |
+   | `NEON_AUTH_COOKIE_SECRET` | Random 32+ character cookie signing secret; generate with `openssl rand -base64 32` |
 
    Add the environment variable `PRODUCTION_URL` with the exact HTTPS website origin, without a trailing slash. Never paste credentials into code, chat, or a workflow file.
-5. Merge the deployment changes into `main`. Check **Actions > Check and deploy**. Later merges run the same workflow automatically. To retry, use **Run workflow** on `main`.
+5. Enable Neon Auth on the same database/branch, set `auth_url` in `server/deployment.json` to the returned URL, and add `PRODUCTION_URL` as a trusted Auth domain. Email/password signup and password reset use Neon’s built-in provider; no paid email service is required. Enable localhost separately for development. Use different cookie secrets locally and in production.
+6. Merge the deployment changes into `main`. Check **Actions > Check and deploy**. Later merges run the same workflow automatically. To retry, use **Run workflow** on `main`.
 
-The workflow checks tests, TypeScript, lint and both builds before deployment. Pull requests only run checks. It uploads the checked artifacts, deploys the Neon Function first, then the Cloudflare website with its runtime database secret, waits for the website to respond over HTTPS, and runs the room-join integration test against the website. That test now sends the website's Origin header on its WebSocket connections to catch a missing allowlist entry. It creates a temporary test room.
+The workflow checks tests, TypeScript, lint and both builds before deployment. Pull requests only run checks. It uploads the checked artifacts, applies `server/schema.sql`, deploys the Neon Function first, then the Cloudflare website with its runtime database and auth cookie secrets, waits for the website to respond over HTTPS, and runs the room-join integration test against the website. That test now sends the website's Origin header on its WebSocket connections to catch a missing allowlist entry. It creates a temporary test room.
 
 `ALLOWED_ORIGINS` on the Neon Function is set from `PRODUCTION_URL`. Local development origins on port 3000 remain supported. If you add more domains, update the deployment script to pass all intended origins, comma-separated.
 
@@ -53,17 +55,18 @@ Deployments are serialized and never cancel an in-progress rollout. The two prov
 
 To roll back both components, revert the bad commit through a pull request and merge it to `main`. Re-running an old workflow can publish old code over newer changes, so prefer a revert. A failing post-deployment integration test marks the run failed but does not automatically roll back either service.
 
-The workflow does not apply database schema changes. The existing database already has `server/schema.sql`. For a new database, apply that schema once before deployment. Review future migrations separately and apply backward-compatible migrations before merging code that requires them.
+The workflow applies the idempotent `server/schema.sql` before deploying code. Keep changes additive and backward compatible: a failed deployment does not undo a migration. Account profiles and completed results persist independently of temporary rooms. Deleting expired rooms does not delete stats.
 
 Share the public Cloudflare URL above. The former ChatGPT Sites URL is retired and does not receive these deployments.
 
 ## Replacing the multiplayer backend
 
 1. Create a project in the existing free Neon organization, in `aws-us-east-2`, with a `lastlight` database and `lastlight_owner` role. Keep the free plan and minimum compute.
-2. Apply `server/schema.sql` to the new database. This creates empty room, command and rate-limit tables.
+2. Apply `server/schema.sql` to the new database. This creates empty room, command, rate-limit, account and result tables.
 3. Update the project and branch in `server/deployment.json`. Build and deploy the Function using `npm run server:build` and `SITE_TEST_URL=https://sandbox-royale.reactjack7.workers.dev npm run server:deploy`. This requires an authenticated Neon CLI or `NEON_API_KEY`.
 4. Set `url` in `server/deployment.json` to the actual invocation URL returned by Neon, without a trailing slash. Do not guess the cluster hostname.
 5. Test the new backend. Replace the GitHub production secrets `NEON_API_KEY` with a key scoped to the new project and `MULTIPLAYER_DATABASE_URL` with its connection string before merging. Update any ignored local `.dev.vars` separately.
-6. Merge and verify the GitHub deployment and public-site integration test. Existing rooms do not carry over; players must refresh the website and create new rooms. Keep the previous project until the switch is verified.
+6. Enable Neon Auth on the replacement branch, update `auth_url`, and trust the website origin. A fresh project does not preserve users, sessions, saved settings or stats: migrate those deliberately if replacing a project with real accounts.
+7. Merge and verify the GitHub deployment and public-site integration test. Existing rooms do not carry over; players must refresh the website and create new rooms. Keep the previous project until the switch is verified.
 
 If a deployment publishes successfully but the integration test fails, inspect the Neon Function logs and GitHub job output. A quota-exceeded database error requires waiting for the allowance to reset or a separately approved hosting change. Retrying deployment alone will not restore the allowance.

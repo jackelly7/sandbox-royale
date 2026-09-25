@@ -98,6 +98,7 @@ import type {
 } from '../lib/game/multiplayer.ts';
 export const CAPACITY = 8;
 export type Member = Player & {
+  accountId?: string;
   tokenHash: string;
   lastSeen: number;
   moveAt: number;
@@ -140,6 +141,15 @@ export type Room = {
   tokens?: ComebackToken[];
   scores?: SessionScore[];
   scoredRound?: number;
+  matchId?: string;
+  accountResults?: {
+    matchId: string;
+    accountId: string;
+    mode: string;
+    wins: number;
+    kills: number;
+    deaths: number;
+  }[];
 };
 export class GameError extends Error {
   status: number;
@@ -394,6 +404,22 @@ function recordRound(room: Room) {
       score.wins++;
   }
   room.scores = room.scores.slice(-64);
+  if (room.matchId)
+    room.accountResults = room.players
+      .filter((p) => p.accountId && !p.bot && !p.spectator)
+      .map((p) => ({
+        matchId: room.matchId!,
+        accountId: p.accountId!,
+        mode: room.mode ?? 'solo',
+        wins: Number(
+          room.winner === p.id ||
+            (isTeamMode(room.mode) &&
+              room.winningTeam != null &&
+              p.team === room.winningTeam),
+        ),
+        kills: p.kills,
+        deaths: p.deaths ?? 0,
+      }));
 }
 function currentZone(room: Room, now: number) {
   return zoneAt(
@@ -1371,6 +1397,7 @@ export function applyCommand(
     room.busDuration = BUS_SECONDS;
     room.phase = 'countdown';
     room.round++;
+    room.matchId = randomUUID();
     room.startAt = now + 5000;
     room.tickAt = now;
     room.winner = null;
@@ -1750,6 +1777,7 @@ export function snapshot(room: Room, now: number): RoomSnapshot {
     winner: room.winner,
     players: room.players.map(
       ({
+        accountId: _accountId,
         tokenHash: _tokenHash,
         lastSeen: _lastSeen,
         moveAt: _moveAt,
